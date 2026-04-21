@@ -16,6 +16,12 @@ def real_val(solver: cvc5.Solver, value: int | str):
     return solver.mkReal(str(value))
 
 
+def num_val(solver: cvc5.Solver, sort, value: int | str):
+    if sort.isInteger():
+        return solver.mkInteger(int(value))
+    return solver.mkReal(str(value))
+
+
 def add_terms(solver: cvc5.Solver, *terms):
     if not terms:
         return real_val(solver, 0)
@@ -53,6 +59,7 @@ class RSPContext:
     solver: cvc5.Solver
     real_sort: object
     bool_sort: object
+    integer_arithmetic: bool
     aircraft: tuple[str, ...]
     r: dict[str, object]
     b: dict[str, object]
@@ -65,7 +72,7 @@ class RSPContext:
 
     @property
     def variable_constraints(self) -> list[object]:
-        zero = real_val(self.solver, 0)
+        zero = num_val(self.solver, self.real_sort, 0)
         return [
             *[
                 self.solver.mkTerm(Kind.GEQ, param[ac], zero)
@@ -130,27 +137,36 @@ def make_context(
     aircraft: list[str] | tuple[str, ...],
     solver: cvc5.Solver | None = None,
     configure_solver: bool = True,
+    integer_arithmetic: bool = False,
+    use_sygus_vars: bool = False,
 ) -> RSPContext:
     solver = solver or cvc5.Solver()
     if configure_solver:
-        solver.setLogic("QF_LRA")
+        solver.setLogic("QF_LIA" if integer_arithmetic else "QF_LRA")
         solver.setOption("produce-models", "true")
-    real_sort = solver.getRealSort()
+    real_sort = solver.getIntegerSort() if integer_arithmetic else solver.getRealSort()
     bool_sort = solver.getBooleanSort()
     aircraft = tuple(aircraft)
+    if use_sygus_vars:
+        def mk_symbol(name: str):
+            return solver.declareSygusVar(name, real_sort)
+    else:
+        def mk_symbol(name: str):
+            return solver.mkConst(real_sort, name)
     return RSPContext(
         solver=solver,
         real_sort=real_sort,
         bool_sort=bool_sort,
+        integer_arithmetic=integer_arithmetic,
         aircraft=aircraft,
-        r={ac: solver.mkConst(real_sort, f"r_{ac}") for ac in aircraft},
-        b={ac: solver.mkConst(real_sort, f"b_{ac}") for ac in aircraft},
-        c={ac: solver.mkConst(real_sort, f"c_{ac}") for ac in aircraft},
-        ec={ac: solver.mkConst(real_sort, f"ec_{ac}") for ac in aircraft},
-        lc={ac: solver.mkConst(real_sort, f"lc_{ac}") for ac in aircraft},
-        et={ac: solver.mkConst(real_sort, f"et_{ac}") for ac in aircraft},
-        lt={ac: solver.mkConst(real_sort, f"lt_{ac}") for ac in aircraft},
-        delta={(x, y): solver.mkConst(real_sort, f"d_{x}_{y}") for x, y in product(aircraft, aircraft)},
+        r={ac: mk_symbol(f"r_{ac}") for ac in aircraft},
+        b={ac: mk_symbol(f"b_{ac}") for ac in aircraft},
+        c={ac: mk_symbol(f"c_{ac}") for ac in aircraft},
+        ec={ac: mk_symbol(f"ec_{ac}") for ac in aircraft},
+        lc={ac: mk_symbol(f"lc_{ac}") for ac in aircraft},
+        et={ac: mk_symbol(f"et_{ac}") for ac in aircraft},
+        lt={ac: mk_symbol(f"lt_{ac}") for ac in aircraft},
+        delta={(x, y): mk_symbol(f"d_{x}_{y}") for x, y in product(aircraft, aircraft)},
     )
 
 
@@ -223,15 +239,20 @@ def ctot_cost(ctx: RSPContext, takeoff, aircraft: str):
     solver = ctx.solver
     lc = ctx.lc[aircraft]
     late = solver.mkTerm(Kind.SUB, takeoff, lc)
+    zero = num_val(solver, ctx.real_sort, 0)
+    two = num_val(solver, ctx.real_sort, 2)
+    three = num_val(solver, ctx.real_sort, 3)
+    four = num_val(solver, ctx.real_sort, 4)
+    three_hundred = num_val(solver, ctx.real_sort, 300)
     return solver.mkTerm(
         Kind.ITE,
         solver.mkTerm(Kind.LEQ, takeoff, lc),
-        real_val(solver, 0),
+        zero,
         solver.mkTerm(
             Kind.ITE,
-            solver.mkTerm(Kind.LEQ, takeoff, add_terms(solver, lc, real_val(solver, 300))),
-            add_terms(solver, mul_terms(solver, real_val(solver, 1), late), real_val(solver, 2)),
-            add_terms(solver, mul_terms(solver, real_val(solver, 3), late), real_val(solver, 4)),
+            solver.mkTerm(Kind.LEQ, takeoff, add_terms(solver, lc, three_hundred)),
+            add_terms(solver, late, two),
+            add_terms(solver, mul_terms(solver, three, late), four),
         ),
     )
 
@@ -247,9 +268,9 @@ def make_phi_block(k: int) -> list[str]:
     return [f"psi{sub(k)}{sub(t)}" for t in range(1, PHI_SIZE + 1)]
 
 
-def get_sequences() -> tuple[RSPSequenceContext, RSPSequenceContext, RSPContext]:
+def get_sequences(integer_arithmetic: bool = False) -> tuple[RSPSequenceContext, RSPSequenceContext, RSPContext]:
     psi1, psi2, psi3 = make_phi_block(1), make_phi_block(2), make_phi_block(3)
-    ctx = make_context(psi1 + ["i"] + psi2 + ["j"] + psi3)
+    ctx = make_context(psi1 + ["i"] + psi2 + ["j"] + psi3, integer_arithmetic=integer_arithmetic)
     s1 = ctx.with_sequence(psi1 + ["i"] + psi2 + ["j"] + psi3)
     s2 = ctx.with_sequence(psi1 + ["j"] + psi2 + ["i"] + psi3)
     return s1, s2, ctx
