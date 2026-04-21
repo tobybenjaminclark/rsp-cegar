@@ -1,12 +1,17 @@
 from __future__ import annotations
-
-import argparse
 from dataclasses import dataclass
+from functools import reduce
+from typing import Iterable, Sequence
 import os
 import sys
-
 import cvc5
 from cvc5 import Kind
+
+OBJECTIVE = "delay"
+TIMEOUT_MS = 900_000
+MAX_CONJUNCTS = 3
+REQUIRE_NONVACUOUS = True
+SHOW_WITNESS = False
 
 # Allow direct execution: `python core/synth.py`.
 if __package__ in (None, ""):
@@ -18,51 +23,50 @@ from core.context import add_terms
 from core.context import make_context
 
 
+# Function to apply conjunction operators over a set of terms.
 def and_terms(solver: cvc5.Solver, *terms):
-    if not terms:
-        return solver.mkTrue()
-    if len(terms) == 1:
-        return terms[0]
-    return solver.mkTerm(Kind.AND, *terms)
+    if not terms:           return solver.mkTrue()
+    elif len(terms) == 1:   return terms[0]
+    else:                   return solver.mkTerm(Kind.AND, *terms)
 
 
+# Function to apply disjunction operators over a set of terms.
 def or_terms(solver: cvc5.Solver, *terms):
-    if not terms:
-        return solver.mkFalse()
-    if len(terms) == 1:
-        return terms[0]
-    return solver.mkTerm(Kind.OR, *terms)
+    if not terms:           return solver.mkFalse()
+    elif len(terms) == 1:   return terms[0]
+    else:                   return solver.mkTerm(Kind.OR, *terms)
 
 
+# Function to define a simple information log.
 def log(message: str) -> None:
     print(f"[sygus] {message}", flush=True)
 
 
-def define_fun_to_string(f, params, body) -> str:
-    sort = f.getSort()
-    if sort.isFunction():
-        sort = f.getSort().getFunctionCodomainSort()
-
-    result = "(define-fun " + str(f) + " ("
-    for index, param in enumerate(params):
-        if index > 0:
-            result += " "
-        result += "(" + str(param) + " " + str(param.getSort()) + ")"
-    result += ") " + str(sort) + " " + str(body) + ")"
-    return result
+# Function to convert a CVC5 function to its SMTLIB2 string definition.
+def define_fun_to_string(f: object, params: Iterable[object], body: object) -> str:
+    return (
+        f"(define-fun {f} ("
+        f"{reduce(lambda acc, p: acc + (' ' if acc else '') + f'({p} {p.getSort()})', params, '')}"
+        f") "
+        f"{f.getSort().getFunctionCodomainSort() if f.getSort().isFunction() else f.getSort()} "
+        f"{body})"
+    )
 
 
-def synth_solutions_to_string(terms, sols) -> str:
-    result = "(\n"
-    for index, term in enumerate(terms):
-        params = []
-        body = sols[index]
-        if sols[index].getKind() == Kind.LAMBDA:
-            params += sols[index][0]
-            body = sols[index][1]
-        result += "  " + define_fun_to_string(term, params, body) + "\n"
-    result += ")"
-    return result
+# Function to convert a set of solutions to an SMTLIB2 string definition.
+def synth_solutions_to_string(terms: Sequence[object], sols: Sequence[object]) -> str:
+    parts = lambda i: (
+        sols[i][0] if sols[i].getKind() == Kind.LAMBDA else [],
+        sols[i][1] if sols[i].getKind() == Kind.LAMBDA else sols[i],
+    )
+    return (
+        "(\n"
+        + "".join(
+            f"  {define_fun_to_string(term, parts(index)[0], parts(index)[1])}\n"
+            for index, term in enumerate(terms)
+        )
+        + ")"
+    )
 
 
 class SygusEnv:
@@ -139,10 +143,8 @@ def make_rsp_swap_problem(
 ) -> SygusProblem:
     seq_ij = ("a", "i", "b", "j", "c")
     seq_ji = ("a", "j", "b", "i", "c")
-    log("creating cvc5 SyGuS environment")
     env = SygusEnv(timeout_ms=timeout_ms)
     aircraft = tuple(dict.fromkeys(seq_ij))
-    log(f"building RSP context for aircraft {aircraft}")
     ctx = make_context(
         aircraft,
         env.solver,
@@ -150,21 +152,13 @@ def make_rsp_swap_problem(
         integer_arithmetic=env.integer_arithmetic,
         use_sygus_vars=True,
     )
-    log(f"building sequence contexts: {seq_ij} and {seq_ji}")
     s_ij = ctx.with_sequence(seq_ij)
     s_ji = ctx.with_sequence(seq_ji)
 
-    log(f"expanding objective: {objective_name}")
     objective = make_rsp_objective(s_ij, s_ji, objective_name)
-    log("collecting allowed rule symbols")
     symbols = make_allowed_symbols(ctx)
-    log(f"allowed rule symbols: {len(symbols)}")
-    log("collecting witness symbols for non-vacuity")
     witness_symbols = make_context_witness_symbols(ctx)
-    log(f"witness symbols: {len(witness_symbols)}")
-    log("building foundational constraints")
     background_constraints = tuple(ctx.foundational_constraints)
-    log(f"background constraints: {len(background_constraints)}")
     return SygusProblem(
         env=env,
         ctx=ctx,
@@ -186,7 +180,6 @@ def make_rsp_objective(
 
     if objective_name == "makespan":
         last_plane = s_ij.seq[-1]
-        log(f"using final-plane takeoff terms for {last_plane}")
         return ObjectiveComponent(
             name=f"last-takeoff makespan component T_{last_plane}",
             left=s_ij.takeoff[last_plane],
@@ -194,7 +187,6 @@ def make_rsp_objective(
         )
 
     if objective_name == "delay":
-        log("using total-delay sums")
         return ObjectiveComponent(
             name="total delay",
             left=add_terms(solver, *(s_ij.delay[plane] for plane in s_ij.ctx.aircraft)),
@@ -311,10 +303,7 @@ def make_pruning_rule_grammar(env: SygusEnv, symbols: tuple[SygusSymbol, ...], m
     solver = env.solver
     start = solver.mkVar(env.bool_sort, "Rule")
     atom = solver.mkVar(env.bool_sort, "Atom")
-    log("building allowed predicate grammar")
     predicates = allowed_predicates(env, symbols)
-    log(f"grammar predicates: {len(predicates)}")
-    log(f"max conjunction width: {max_conjuncts}")
 
     rule_shapes = [atom]
     for width in range(2, max_conjuncts + 1):
@@ -369,7 +358,6 @@ def rule_instances(
 def synthesize_witnesses(problem: SygusProblem) -> tuple[object, ...]:
     solver = problem.env.solver
     witness_sort = problem.ctx.real_sort
-    log(f"declaring {len(problem.witness_symbols)} synthesized witness constants")
     return tuple(
         solver.synthFun(f"w_{symbol.name}", [], witness_sort)
         for symbol in problem.witness_symbols
@@ -396,13 +384,11 @@ def witness_substitutions(
 def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[object, ...]) -> None:
     env = problem.env
     solver = env.solver
-    log("building non-vacuity witness constraint")
     substitutions = witness_substitutions(problem.witness_symbols, witnesses)
     witness_background = [
         substitute_all(constraint, substitutions)
         for constraint in problem.background_constraints
     ]
-    log(f"instantiating witness schema rule for {len(problem.ctx.aircraft)} aircraft")
     witness_rule_instances = rule_instances(problem, rule, substitutions)
 
     nonvacuity = and_terms(
@@ -410,7 +396,6 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
         and_terms(solver, *witness_background),
         and_terms(solver, *witness_rule_instances),
     )
-    log("adding non-vacuity constraint")
     solver.addSygusConstraint(nonvacuity)
 
 
@@ -423,14 +408,10 @@ def synthesize_pruning_rule(
     solver = env.solver
     symbols = problem.symbols
 
-    log("building pruning-rule grammar")
     grammar = make_pruning_rule_grammar(env, symbols, max_conjuncts)
-    log("declaring prune synthesis function")
     rule = solver.synthFun("prune", [symbol.formal for symbol in symbols], env.bool_sort, grammar)
     witnesses = synthesize_witnesses(problem) if require_nonvacuous else ()
 
-    log("building universal safety constraint")
-    log(f"instantiating schema rule for {len(problem.ctx.aircraft)} aircraft")
     rule_on_rsp_vars = and_terms(solver, *rule_instances(problem, rule))
     valid_rsp = and_terms(solver, *problem.background_constraints)
     safety = or_terms(
@@ -438,7 +419,6 @@ def synthesize_pruning_rule(
         solver.mkTerm(Kind.NOT, and_terms(solver, valid_rsp, rule_on_rsp_vars)),
         problem.objective.claim(env),
     )
-    log("adding universal safety constraint")
     solver.addSygusConstraint(safety)
 
     if require_nonvacuous:
@@ -450,48 +430,25 @@ def synthesize_pruning_rule(
     if not check.hasSolution():
         return SynthesisResult(problem, rule, witnesses, check, None, None)
 
-    log("retrieving synthesized pruning rule")
     rule_solution = synth_solutions_to_string([rule], solver.getSynthSolutions([rule]))
     witness_solution = None
     if witnesses:
-        log("retrieving synthesized witness values")
         witness_terms = list(witnesses)
         witness_solution = synth_solutions_to_string(witness_terms, solver.getSynthSolutions(witness_terms))
     return SynthesisResult(problem, rule, witnesses, check, rule_solution, witness_solution)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Synthesize RSP pruning rules with cvc5 SyGuS.")
-    parser.add_argument("--objective", choices=("makespan", "delay"), default="delay")
-    parser.add_argument("--timeout-ms", type=int, default=900_000)
-    parser.add_argument("--max-conjuncts", type=int, default=3)
-    parser.add_argument("--require-nonvacuous", action="store_true")
-    parser.add_argument("--no-nonvacuous", action="store_true")
-    parser.add_argument("--show-witness", action="store_true")
-    args = parser.parse_args()
-
-    objective = args.objective
-    timeout_ms = args.timeout_ms
-    require_nonvacuous = True
-    if args.no_nonvacuous:
-        require_nonvacuous = False
-    if args.require_nonvacuous:
-        require_nonvacuous = True
-    show_witness = args.show_witness
-    max_conjuncts = args.max_conjuncts
-
-    log(f"configured objective: {objective}")
-    log(f"configured timeout_ms: {timeout_ms}")
-    log(f"configured require_nonvacuous: {require_nonvacuous}")
-    log(f"configured show_witness: {show_witness}")
-    log(f"configured max_conjuncts: {max_conjuncts}")
-    problem = make_rsp_swap_problem(timeout_ms=timeout_ms, objective_name=objective)
-
-    log(f"allowed symbols: {', '.join(symbol.name for symbol in problem.symbols)}")
+    log(
+        "config: "
+        f"objective={OBJECTIVE}, timeout_ms={TIMEOUT_MS}, "
+        f"require_nonvacuous={REQUIRE_NONVACUOUS}, max_conjuncts={MAX_CONJUNCTS}"
+    )
+    problem = make_rsp_swap_problem(timeout_ms=TIMEOUT_MS, objective_name=OBJECTIVE)
     result = synthesize_pruning_rule(
         problem,
-        require_nonvacuous=require_nonvacuous,
-        max_conjuncts=max_conjuncts,
+        require_nonvacuous=REQUIRE_NONVACUOUS,
+        max_conjuncts=MAX_CONJUNCTS,
     )
 
     print(f"Objective: {problem.objective.name}")
@@ -500,10 +457,10 @@ def main() -> None:
         print(f"S_ji: {problem.seq_ji}")
     print(f"Allowed symbols: {', '.join(symbol.name for symbol in problem.symbols)}")
     print(f"SyGuS result: {result.check}")
-    print(f"Non-vacuity witness: {'synthesized' if require_nonvacuous else 'disabled'}")
+    print(f"Non-vacuity witness: {'synthesized' if REQUIRE_NONVACUOUS else 'disabled'}")
     if result.rule_solution is not None:
         print(result.rule_solution)
-    if show_witness and result.witness_solution is not None:
+    if SHOW_WITNESS and result.witness_solution is not None:
         print(result.witness_solution)
 
 
