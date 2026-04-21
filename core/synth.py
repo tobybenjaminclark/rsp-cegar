@@ -69,6 +69,7 @@ def synth_solutions_to_string(terms: Sequence[object], sols: Sequence[object]) -
     )
 
 
+# Class to build and configure the SyGuS CVC5 environment.
 class SygusEnv:
     def __init__(self, logic: str = "LIA", timeout_ms: int = 10_000, integer_arithmetic: bool = True) -> None:
         self.integer_arithmetic = integer_arithmetic
@@ -92,6 +93,7 @@ class SygusEnv:
         return self.solver.mkReal(str(value))
 
 
+# Dataclass to represent a symbolic grammar variable and its concrete interpretation.
 @dataclass(frozen=True)
 class SygusSymbol:
     name: str
@@ -99,12 +101,14 @@ class SygusSymbol:
     actual: object | None
 
 
+# Dataclass to represent a witness symbol used for non-vacuity constraints.
 @dataclass(frozen=True)
 class WitnessSymbol:
     name: str
     actual: object
 
 
+# Dataclass to represent an objective comparison between two sequence terms.
 @dataclass(frozen=True)
 class ObjectiveComponent:
     name: str
@@ -115,6 +119,7 @@ class ObjectiveComponent:
         return env.solver.mkTerm(Kind.LEQ, self.left, self.right)
 
 
+# Dataclass to represent the complete synthesis problem instance.
 @dataclass(frozen=True)
 class SygusProblem:
     env: SygusEnv
@@ -127,6 +132,7 @@ class SygusProblem:
     seq_ji: tuple[str, ...] | None = None
 
 
+# Dataclass to represent the result of the synthesis query.
 @dataclass(frozen=True)
 class SynthesisResult:
     problem: SygusProblem
@@ -137,6 +143,7 @@ class SynthesisResult:
     witness_solution: str | None
 
 
+# Function to build the base RSP swap synthesis problem.
 def make_rsp_swap_problem(
     timeout_ms: int = 10_000,
     objective_name: str = "makespan",
@@ -171,6 +178,7 @@ def make_rsp_swap_problem(
     )
 
 
+# Function to derive the objective term pair for the selected objective.
 def make_rsp_objective(
     s_ij: RSPSequenceContext,
     s_ji: RSPSequenceContext,
@@ -196,6 +204,7 @@ def make_rsp_objective(
     raise ValueError(f"Unknown objective: {objective_name}")
 
 
+# Function to collect all context symbols that may appear in witness substitutions.
 def make_context_witness_symbols(ctx: RSPContext) -> tuple[WitnessSymbol, ...]:
     symbols: list[WitnessSymbol] = []
     seen: set[str] = set()
@@ -225,6 +234,7 @@ def make_context_witness_symbols(ctx: RSPContext) -> tuple[WitnessSymbol, ...]:
     return tuple(symbols)
 
 
+# Function to collect the allowed schema symbols for pruning-rule synthesis.
 def make_allowed_symbols(ctx: RSPContext) -> tuple[SygusSymbol, ...]:
     solver = ctx.solver
     symbols: list[SygusSymbol] = []
@@ -259,10 +269,12 @@ def make_allowed_symbols(ctx: RSPContext) -> tuple[SygusSymbol, ...]:
     return tuple(symbols)
 
 
+# Function to map symbol names to their formal grammar terms.
 def symbol_map(symbols: tuple[SygusSymbol, ...]) -> dict[str, object]:
     return {symbol.name: symbol.formal for symbol in symbols}
 
 
+# Function to define the allowed atomic predicates in the grammar.
 def allowed_predicates(env: SygusEnv, symbols: tuple[SygusSymbol, ...]) -> list[object]:
     solver = env.solver
     formals = symbol_map(symbols)
@@ -296,6 +308,7 @@ def allowed_predicates(env: SygusEnv, symbols: tuple[SygusSymbol, ...]) -> list[
     return predicates
 
 
+# Function to build the pruning rule grammar with bounded conjunction width.
 def make_pruning_rule_grammar(env: SygusEnv, symbols: tuple[SygusSymbol, ...], max_conjuncts: int):
     if max_conjuncts < 1:
         raise ValueError("max_conjuncts must be at least 1")
@@ -315,10 +328,12 @@ def make_pruning_rule_grammar(env: SygusEnv, symbols: tuple[SygusSymbol, ...], m
     return grammar
 
 
+# Function to apply the synthesized pruning rule over a concrete argument list.
 def apply_rule(env: SygusEnv, rule, args: list[object]):
     return env.solver.mkTerm(Kind.APPLY_UF, rule, *args)
 
 
+# Function to instantiate schema symbols for a specific aircraft.
 def symbol_actual_for_aircraft(problem: SygusProblem, symbol: SygusSymbol, aircraft: str):
     if symbol.name == "D_i_x":
         return problem.ctx.delta[("i", aircraft)]
@@ -333,6 +348,7 @@ def symbol_actual_for_aircraft(problem: SygusProblem, symbol: SygusSymbol, aircr
     return symbol.actual
 
 
+# Function to build the rule-argument vector for one aircraft.
 def rule_args_for_aircraft(
     problem: SygusProblem,
     aircraft: str,
@@ -344,6 +360,7 @@ def rule_args_for_aircraft(
     ]
 
 
+# Function to instantiate the synthesized rule over all aircraft in the context.
 def rule_instances(
     problem: SygusProblem,
     rule,
@@ -355,6 +372,7 @@ def rule_instances(
     ]
 
 
+# Function to declare synthesized witness constants used for non-vacuity.
 def synthesize_witnesses(problem: SygusProblem) -> tuple[object, ...]:
     solver = problem.env.solver
     witness_sort = problem.ctx.real_sort
@@ -364,6 +382,7 @@ def synthesize_witnesses(problem: SygusProblem) -> tuple[object, ...]:
     )
 
 
+# Function to apply a sequence of substitutions over a term.
 def substitute_all(term, substitutions: tuple[tuple[object, object], ...]):
     current = term
     for old, new in substitutions:
@@ -371,6 +390,7 @@ def substitute_all(term, substitutions: tuple[tuple[object, object], ...]):
     return current
 
 
+# Function to pair each witness symbol with its synthesized witness term.
 def witness_substitutions(
     witness_symbols: tuple[WitnessSymbol, ...],
     witnesses: tuple[object, ...],
@@ -381,6 +401,7 @@ def witness_substitutions(
     )
 
 
+# Function to add the non-vacuity synthesis constraint.
 def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[object, ...]) -> None:
     env = problem.env
     solver = env.solver
@@ -399,6 +420,7 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
     solver.addSygusConstraint(nonvacuity)
 
 
+# Function to synthesize a pruning rule under safety and optional non-vacuity constraints.
 def synthesize_pruning_rule(
     problem: SygusProblem,
     require_nonvacuous: bool = True,
@@ -438,6 +460,7 @@ def synthesize_pruning_rule(
     return SynthesisResult(problem, rule, witnesses, check, rule_solution, witness_solution)
 
 
+# Function to run synthesis with top-level configuration constants.
 def main() -> None:
     log(
         "config: "
