@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import datetime
 from dataclasses import dataclass
 from functools import reduce
 from typing import Iterable, Sequence
@@ -39,7 +41,8 @@ def or_terms(solver: cvc5.Solver, *terms):
 
 # Function to define a simple information log.
 def log(message: str) -> None:
-    print(f"[sygus] {message}", flush=True)
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
 
 
 # Function to convert a CVC5 function to its SMTLIB2 string definition.
@@ -421,11 +424,7 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
 
 
 # Function to synthesize a pruning rule under safety and optional non-vacuity constraints.
-def synthesize_pruning_rule(
-    problem: SygusProblem,
-    require_nonvacuous: bool = True,
-    max_conjuncts: int = 5,
-) -> SynthesisResult:
+def synthesize_pruning_rule(problem: SygusProblem, require_nonvacuous: bool = True, max_conjuncts: int = 5) -> SynthesisResult:
     env = problem.env
     solver = env.solver
     symbols = problem.symbols
@@ -446,9 +445,9 @@ def synthesize_pruning_rule(
     if require_nonvacuous:
         add_nonvacuity_constraint(problem, rule, witnesses)
 
-    log("calling cvc5 checkSynth; this is the likely long-running step")
+    log("Invoking Synthesis (This may take some time)")
     check = solver.checkSynth()
-    log(f"checkSynth returned: {check}")
+    log(f"Synthesis Complete, Result: {check}")
     if not check.hasSolution():
         return SynthesisResult(problem, rule, witnesses, check, None, None)
 
@@ -462,25 +461,17 @@ def synthesize_pruning_rule(
 
 # Function to run synthesis with top-level configuration constants.
 def main() -> None:
-    log(
-        "config: "
-        f"objective={OBJECTIVE}, timeout_ms={TIMEOUT_MS}, "
-        f"require_nonvacuous={REQUIRE_NONVACUOUS}, max_conjuncts={MAX_CONJUNCTS}"
-    )
+    log(f"Configuration: Objective = {OBJECTIVE}, Timeout = {int(TIMEOUT_MS * 0.001):,}s, ")
     problem = make_rsp_swap_problem(timeout_ms=TIMEOUT_MS, objective_name=OBJECTIVE)
+
+    log(f"Symbol Set: [{', '.join(symbol.name.replace("_", "") for symbol in problem.symbols)}]")
     result = synthesize_pruning_rule(
         problem,
         require_nonvacuous=REQUIRE_NONVACUOUS,
         max_conjuncts=MAX_CONJUNCTS,
     )
 
-    print(f"Objective: {problem.objective.name}")
-    if problem.seq_ij is not None and problem.seq_ji is not None:
-        print(f"S_ij: {problem.seq_ij}")
-        print(f"S_ji: {problem.seq_ji}")
-    print(f"Allowed symbols: {', '.join(symbol.name for symbol in problem.symbols)}")
-    print(f"SyGuS result: {result.check}")
-    print(f"Non-vacuity witness: {'synthesized' if REQUIRE_NONVACUOUS else 'disabled'}")
+    log(f"Non-vacuity witness: {'Synthesized' if REQUIRE_NONVACUOUS else 'Disabled'}")
     if result.rule_solution is not None:
         print(result.rule_solution)
     if SHOW_WITNESS and result.witness_solution is not None:
