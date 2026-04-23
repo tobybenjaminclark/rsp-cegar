@@ -56,7 +56,6 @@ def main() -> None:
     set_smt_env(
         symbol_table={symbol.name: symbol.formal for symbol in problem.symbols},
     )
-
     grammar = grammar.to_cvc5(problem.env.solver)
 
 
