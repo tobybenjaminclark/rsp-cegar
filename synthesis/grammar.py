@@ -1,15 +1,13 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from dataclasses import field
 from functools import reduce
 from typing import Iterator
 from typing import Protocol
-
 import cvc5
 from cvc5 import Kind
 
-from core.context import RSPContext
+
 
 class SMTConvertible(Protocol):
     def to_cvc5(self, solver: cvc5.Solver) -> object:               raise Exception("Not implemented")
@@ -33,22 +31,11 @@ class Expr(SMTConvertible, Rebindable):
         if isinstance(self, Choice): return self.__or__(other)
         return Choice((self, other))
 
-    def __and__(self, other: Expr) -> "And":
-        if isinstance(self, And): return And(self.terms + (other,))
-        return And((self, other))
-
-    def __add__(self, other: Expr) -> "Add":
-        if isinstance(self, Add): return Add(self.terms + (other,))
-        return Add((self, other))
-
-    def __le__(self, other: Expr) -> "Leq":
-        return Leq(self, other)
-
-    def eq(self, other: Expr) -> "Eq":
-        return Eq(self, other)
-
-    def to_cvc5(self, solver: cvc5.Solver) -> object:
-        raise NotImplementedError
+    # Operator overloads for ^ + <= =
+    def __and__(self, other: Expr) -> "And":    return And(self.terms + (other,)) if isinstance(self, And) else And((self, other))
+    def __add__(self, other: Expr) -> "Add":    return Add(self.terms + (other,)) if isinstance(self, Add) else Add((self, other))
+    def __le__(self, other: Expr) -> "Leq":     return Leq(self, other)
+    def eq(self, other: Expr) -> "Eq":          return Eq(self, other)
 
     def __iter__(self) -> Iterator["Expr"]:
         return iter(())
