@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from dataclasses import field
 from functools import reduce
+from typing import Iterator
 from typing import Protocol
 
 import cvc5
@@ -10,24 +11,24 @@ from cvc5 import Kind
 
 from core.context import RSPContext
 
-
 class SMTConvertible(Protocol):
-    def to_cvc5(self, solver: cvc5.Solver) -> object:
-        raise Exception("Not implemented")
+    def to_cvc5(self, solver: cvc5.Solver) -> object:               raise Exception("Not implemented")
+
+class Rebindable(Protocol):
+    def __iter__(self) -> Iterator["Expr"]:                         raise Exception("Not implemented")
+    def rebind(self, index: dict[str, "NonTerminal"]) -> None:      raise Exception("Not implemented")
+
+SMT_ENV: dict[str, dict[str, object]] = {"symbol_table": {}}
 
 
-SMT_ENV: dict[str, dict[str, object]] = {
-    "symbol_table": {},
-    "nonterminal_table": {},
-}
+
+def set_smt_env(*, symbol_table: dict[str, object] | None = None) -> None:
+    if symbol_table is not None:
+        SMT_ENV["symbol_table"] = dict(symbol_table)
 
 
-def set_smt_env(*, symbol_table: dict[str, object] | None = None, nonterminal_table: dict[str, object] | None = None,) -> None:
-    if symbol_table is not None:        SMT_ENV["symbol_table"] = dict(symbol_table)
-    if nonterminal_table is not None:   SMT_ENV["nonterminal_table"] = dict(nonterminal_table)
 
-
-class Expr(SMTConvertible):
+class Expr(SMTConvertible, Rebindable):
     def __or__(self, other: Expr) -> "Choice":
         if isinstance(self, Choice): return self.__or__(other)
         return Choice((self, other))
@@ -49,6 +50,14 @@ class Expr(SMTConvertible):
     def to_cvc5(self, solver: cvc5.Solver) -> object:
         raise NotImplementedError
 
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter(())
+
+    def rebind(self, index: dict[str, "NonTerminal"]) -> None:
+        for child in self:
+            child.rebind(index)
+
+
 
 @dataclass(frozen=True)
 class Terminal(Expr):
@@ -62,10 +71,14 @@ class Terminal(Expr):
         raise KeyError(f"Unknown terminal symbol: {self.name}")
 
 
+
 @dataclass
 class NonTerminal(Expr):
     name: str
+    sort: object | None = None
     grammar: "Grammar | None" = None
+    _term: object | None = field(default=None, init=False, repr=False, compare=False)
+    _bound_to: "NonTerminal | None" = field(default=None, init=False, repr=False, compare=False)
 
     def __rshift__(self, rhs: Expr) -> "Production":
         return Production(self, rhs if isinstance(rhs, Choice) else Choice((rhs,)))
@@ -76,10 +89,23 @@ class NonTerminal(Expr):
         self.grammar.add_production(self >> rhs)
         return self
 
+    def _root(self) -> "NonTerminal":
+        target = self
+        while target._bound_to is not None:
+            target = target._bound_to
+        return target
+
     def to_cvc5(self, solver: cvc5.Solver) -> object:
-        if self.name not in SMT_ENV["nonterminal_table"]:
-            raise KeyError(f"Unknown nonterminal symbol: {self.name}")
-        return SMT_ENV["nonterminal_table"][self.name]
+        target = self._root()
+        if target._term is None:
+            target._term = solver.mkVar(target.sort or solver.getBooleanSort(), target.name)
+        return target._term
+
+    def rebind(self, index: dict[str, "NonTerminal"]) -> None:
+        target = index.get(self.name)
+        if target is not None and target is not self:
+            self._bound_to = target
+
 
 
 @dataclass(frozen=True)
@@ -90,13 +116,20 @@ class Choice(Expr):
         if isinstance(other, Choice): return Choice(self.alts + other.alts)
         return Choice(self.alts + (other,))
 
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter(self.alts)
+
     def to_cvc5(self, solver: cvc5.Solver) -> tuple[object, ...]:
         return tuple(map(lambda alt: alt.to_cvc5(solver), self.alts))
+
 
 
 @dataclass(frozen=True)
 class And(Expr):
     terms: tuple[Expr, ...]
+
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter(self.terms)
 
     def to_cvc5(self, solver: cvc5.Solver) -> object:
         compiled = tuple(map(lambda term: term.to_cvc5(solver), self.terms))
@@ -105,13 +138,18 @@ class And(Expr):
         return solver.mkTerm(Kind.AND, *compiled)
 
 
+
 @dataclass(frozen=True)
 class Eq(Expr):
     left: Expr
     right: Expr
 
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter((self.left, self.right))
+
     def to_cvc5(self, solver: cvc5.Solver) -> object:
         return solver.mkTerm(Kind.EQUAL, self.left.to_cvc5(solver), self.right.to_cvc5(solver))
+
 
 
 @dataclass(frozen=True)
@@ -119,13 +157,20 @@ class Leq(Expr):
     left: Expr
     right: Expr
 
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter((self.left, self.right))
+
     def to_cvc5(self, solver: cvc5.Solver) -> object:
         return solver.mkTerm(Kind.LEQ, self.left.to_cvc5(solver), self.right.to_cvc5(solver))
+
 
 
 @dataclass(frozen=True)
 class Add(Expr):
     terms: tuple[Expr, ...]
+
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter(self.terms)
 
     def to_cvc5(self, solver: cvc5.Solver) -> object:
         compiled = tuple(map(lambda term: term.to_cvc5(solver), self.terms))
@@ -134,13 +179,18 @@ class Add(Expr):
         return solver.mkTerm(Kind.ADD, *compiled)
 
 
+
 @dataclass(frozen=True)
 class Production(SMTConvertible):
     lhs: NonTerminal
     rhs: Choice
 
-    def to_cvc5(self, solver: cvc5.Solver) -> tuple[object, tuple[object, ...]]:
-        return self.lhs.to_cvc5(solver), self.rhs.to_cvc5(solver)
+    def __iter__(self) -> Iterator[Expr]:       return iter((self.lhs, self.rhs))
+    def to_cvc5(self, solver: cvc5.Solver):     return self.lhs.to_cvc5(solver), self.rhs.to_cvc5(solver)
+    def rebind(self, index) -> None:
+        self.lhs.rebind(index)
+        self.rhs.rebind(index)
+
 
 
 @dataclass
@@ -153,19 +203,15 @@ class Grammar(SMTConvertible):
     def __post_init__(self) -> None:
         attached = tuple(
             map(
-                lambda nt: nt if nt.grammar is self else NonTerminal(nt.name, grammar=self),
+                lambda nt: nt if nt.grammar is self else NonTerminal(nt.name, sort=nt.sort, grammar=self),
                 self.nonterminals,
             )
         )
         index = {nt.name: nt for nt in attached}
         self.nonterminals = attached
         self.start = index.get(self.start.name, self.start)
-        self.productions = tuple(
-            map(
-                lambda p: Production(index.get(p.lhs.name, p.lhs), p.rhs),
-                self.productions,
-            )
-        )
+        for production in self.productions:
+            production.rebind(index)
 
     def add_production(self, production: Production) -> "Grammar":
         self.productions = self.productions + (production,)
@@ -183,14 +229,6 @@ class Grammar(SMTConvertible):
         return reduce(fn, self.productions, init)
 
     def to_cvc5(self, solver: cvc5.Solver) -> object:
-        nonterminal_table = dict(SMT_ENV["nonterminal_table"])
-        nonterminal_table.update(
-            {
-                nt.name: nonterminal_table.get(nt.name, solver.mkVar(solver.getBooleanSort(), nt.name))
-                for nt in self.nonterminals
-            }
-        )
-        SMT_ENV["nonterminal_table"] = nonterminal_table
         grammar = solver.mkGrammar(
             tuple(map(lambda t: t.to_cvc5(solver), self.terminals)),
             tuple(map(lambda nt: nt.to_cvc5(solver), self.nonterminals)),

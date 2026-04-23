@@ -24,9 +24,8 @@ def main() -> None:
     #
     # Construct the grammar.
     #
-
-    conj = NonTerminal("Rule")
-    cmp = NonTerminal("Atom")
+    conj = NonTerminal("Rule", sort = problem.env.bool_sort)
+    cmp = NonTerminal("Atom", sort = problem.env.bool_sort)
 
     by_name = {symbol.name: symbol for symbol in problem.symbols}
 
@@ -51,16 +50,19 @@ def main() -> None:
         ),
     )
 
+    #
+    # Binds Terminal symbols to problem variables.
+    #
     set_smt_env(
         symbol_table={symbol.name: symbol.formal for symbol in problem.symbols},
-        nonterminal_table={
-            "Rule": problem.env.solver.mkVar(problem.env.bool_sort, "Rule"),
-            "Atom": problem.env.solver.mkVar(problem.env.bool_sort, "Atom"),
-        },
     )
 
     grammar = grammar.to_cvc5(problem.env.solver)
 
+
+    #
+    # Run Synthesis
+    #
     result = synthesize_pruning_rule(
         problem,
         grammar=grammar,
