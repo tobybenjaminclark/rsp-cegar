@@ -4,48 +4,35 @@ import datetime
 from dataclasses import dataclass
 from functools import reduce
 from typing import Iterable, Sequence
-import os
-import sys
+
 import cvc5
 from cvc5 import Kind
-
-OBJECTIVE = "delay"
-TIMEOUT_MS = 900_000
-MAX_CONJUNCTS = 3
-REQUIRE_NONVACUOUS = True
-SHOW_WITNESS = False
-
-# Allow direct execution: `python core/synth.py`.
-if __package__ in (None, ""):
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from core.context import RSPContext
 from core.context import RSPSequenceContext
 from core.context import add_terms
 from core.context import make_context
+from synthesis.grammar import SygusSymbol
+from synthesis.grammar import make_allowed_symbols
 
 
-# Function to apply conjunction operators over a set of terms.
 def and_terms(solver: cvc5.Solver, *terms):
     if not terms:           return solver.mkTrue()
     elif len(terms) == 1:   return terms[0]
-    else:                   return solver.mkTerm(Kind.AND, *terms)
+    return                  solver.mkTerm(Kind.AND, *terms)
 
 
-# Function to apply disjunction operators over a set of terms.
 def or_terms(solver: cvc5.Solver, *terms):
     if not terms:           return solver.mkFalse()
     elif len(terms) == 1:   return terms[0]
-    else:                   return solver.mkTerm(Kind.OR, *terms)
+    return                  solver.mkTerm(Kind.OR, *terms)
 
 
-# Function to define a simple information log.
 def log(message: str) -> None:
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
     print(f"[{timestamp}] {message}", flush=True)
 
 
-# Function to convert a CVC5 function to its SMTLIB2 string definition.
 def define_fun_to_string(f: object, params: Iterable[object], body: object) -> str:
     return (
         f"(define-fun {f} ("
@@ -56,7 +43,6 @@ def define_fun_to_string(f: object, params: Iterable[object], body: object) -> s
     )
 
 
-# Function to convert a set of solutions to an SMTLIB2 string definition.
 def synth_solutions_to_string(terms: Sequence[object], sols: Sequence[object]) -> str:
     parts = lambda i: (
         sols[i][0] if sols[i].getKind() == Kind.LAMBDA else [],
@@ -72,7 +58,6 @@ def synth_solutions_to_string(terms: Sequence[object], sols: Sequence[object]) -
     )
 
 
-# Class to build and configure the SyGuS CVC5 environment.
 class SygusEnv:
     def __init__(self, logic: str = "LIA", timeout_ms: int = 10_000, integer_arithmetic: bool = True) -> None:
         self.integer_arithmetic = integer_arithmetic
@@ -96,22 +81,12 @@ class SygusEnv:
         return self.solver.mkReal(str(value))
 
 
-# Dataclass to represent a symbolic grammar variable and its concrete interpretation.
-@dataclass(frozen=True)
-class SygusSymbol:
-    name: str
-    formal: object
-    actual: object | None
-
-
-# Dataclass to represent a witness symbol used for non-vacuity constraints.
 @dataclass(frozen=True)
 class WitnessSymbol:
     name: str
     actual: object
 
 
-# Dataclass to represent an objective comparison between two sequence terms.
 @dataclass(frozen=True)
 class ObjectiveComponent:
     name: str
@@ -122,7 +97,6 @@ class ObjectiveComponent:
         return env.solver.mkTerm(Kind.LEQ, self.left, self.right)
 
 
-# Dataclass to represent the complete synthesis problem instance.
 @dataclass(frozen=True)
 class SygusProblem:
     env: SygusEnv
@@ -135,7 +109,6 @@ class SygusProblem:
     seq_ji: tuple[str, ...] | None = None
 
 
-# Dataclass to represent the result of the synthesis query.
 @dataclass(frozen=True)
 class SynthesisResult:
     problem: SygusProblem
@@ -146,7 +119,6 @@ class SynthesisResult:
     witness_solution: str | None
 
 
-# Function to build the base RSP swap synthesis problem.
 def make_rsp_swap_problem(
     timeout_ms: int = 10_000,
     objective_name: str = "makespan",
@@ -181,7 +153,6 @@ def make_rsp_swap_problem(
     )
 
 
-# Function to derive the objective term pair for the selected objective.
 def make_rsp_objective(
     s_ij: RSPSequenceContext,
     s_ji: RSPSequenceContext,
@@ -207,7 +178,6 @@ def make_rsp_objective(
     raise ValueError(f"Unknown objective: {objective_name}")
 
 
-# Function to collect all context symbols that may appear in witness substitutions.
 def make_context_witness_symbols(ctx: RSPContext) -> tuple[WitnessSymbol, ...]:
     symbols: list[WitnessSymbol] = []
     seen: set[str] = set()
@@ -237,106 +207,10 @@ def make_context_witness_symbols(ctx: RSPContext) -> tuple[WitnessSymbol, ...]:
     return tuple(symbols)
 
 
-# Function to collect the allowed schema symbols for pruning-rule synthesis.
-def make_allowed_symbols(ctx: RSPContext) -> tuple[SygusSymbol, ...]:
-    solver = ctx.solver
-    symbols: list[SygusSymbol] = []
-    seen: set[str] = set()
-
-    def add_symbol(name: str, actual) -> None:
-        if name in seen:
-            return
-        seen.add(name)
-        symbols.append(SygusSymbol(name, solver.mkVar(ctx.real_sort, name), actual))
-
-    add_symbol("R_i", ctx.r["i"])
-    add_symbol("R_j", ctx.r["j"])
-    add_symbol("LT_i", ctx.lt["i"])
-    add_symbol("LT_j", ctx.lt["j"])
-    add_symbol("LC_i", ctx.lc["i"])
-    add_symbol("LC_j", ctx.lc["j"])
-    add_symbol("ET_i", ctx.et["i"])
-    add_symbol("ET_j", ctx.et["j"])
-    add_symbol("EC_i", ctx.ec["i"])
-    add_symbol("EC_j", ctx.ec["j"])
-    add_symbol("B_i", ctx.b["i"])
-    add_symbol("B_j", ctx.b["j"])
-    add_symbol("C_i", ctx.c["i"])
-    add_symbol("C_j", ctx.c["j"])
-
-    add_symbol("D_i_x", None)
-    add_symbol("D_j_x", None)
-    add_symbol("D_x_i", None)
-    add_symbol("D_x_j", None)
-
-    return tuple(symbols)
-
-
-# Function to map symbol names to their formal grammar terms.
-def symbol_map(symbols: tuple[SygusSymbol, ...]) -> dict[str, object]:
-    return {symbol.name: symbol.formal for symbol in symbols}
-
-
-# Function to define the allowed atomic predicates in the grammar.
-def allowed_predicates(env: SygusEnv, symbols: tuple[SygusSymbol, ...]) -> list[object]:
-    solver = env.solver
-    formals = symbol_map(symbols)
-    predicates = []
-
-    for prefix in ("R", "LT", "LC", "ET", "EC", "B", "C"):
-        left = formals.get(f"{prefix}_i")
-        right = formals.get(f"{prefix}_j")
-        if left is None or right is None:
-            continue
-        predicates.append(solver.mkTerm(Kind.LEQ, left, right))
-        predicates.append(solver.mkTerm(Kind.LEQ, right, left))
-        predicates.append(solver.mkTerm(Kind.EQUAL, left, right))
-
-    for plane in sorted({name.split("_", 2)[2] for name in formals if name.startswith("D_i_")}):
-        outgoing_i = formals.get(f"D_i_{plane}")
-        outgoing_j = formals.get(f"D_j_{plane}")
-        incoming_i = formals.get(f"D_{plane}_i")
-        incoming_j = formals.get(f"D_{plane}_j")
-
-        if outgoing_i is not None and outgoing_j is not None:
-            predicates.append(solver.mkTerm(Kind.LEQ, outgoing_i, outgoing_j))
-            predicates.append(solver.mkTerm(Kind.LEQ, outgoing_j, outgoing_i))
-            predicates.append(solver.mkTerm(Kind.EQUAL, outgoing_i, outgoing_j))
-
-        if incoming_i is not None and incoming_j is not None:
-            predicates.append(solver.mkTerm(Kind.LEQ, incoming_i, incoming_j))
-            predicates.append(solver.mkTerm(Kind.LEQ, incoming_j, incoming_i))
-            predicates.append(solver.mkTerm(Kind.EQUAL, incoming_i, incoming_j))
-
-    return predicates
-
-
-# Function to build the pruning rule grammar with bounded conjunction width.
-def make_pruning_rule_grammar(env: SygusEnv, symbols: tuple[SygusSymbol, ...], max_conjuncts: int):
-    if max_conjuncts < 1:
-        raise ValueError("max_conjuncts must be at least 1")
-
-    solver = env.solver
-    start = solver.mkVar(env.bool_sort, "Rule")
-    atom = solver.mkVar(env.bool_sort, "Atom")
-    predicates = allowed_predicates(env, symbols)
-
-    rule_shapes = [atom]
-    for width in range(2, max_conjuncts + 1):
-        rule_shapes.append(solver.mkTerm(Kind.AND, *([atom] * width)))
-
-    grammar = solver.mkGrammar([symbol.formal for symbol in symbols], [start, atom])
-    grammar.addRules(start, rule_shapes)
-    grammar.addRules(atom, predicates)
-    return grammar
-
-
-# Function to apply the synthesized pruning rule over a concrete argument list.
 def apply_rule(env: SygusEnv, rule, args: list[object]):
     return env.solver.mkTerm(Kind.APPLY_UF, rule, *args)
 
 
-# Function to instantiate schema symbols for a specific aircraft.
 def symbol_actual_for_aircraft(problem: SygusProblem, symbol: SygusSymbol, aircraft: str):
     if symbol.name == "D_i_x":
         return problem.ctx.delta[("i", aircraft)]
@@ -351,7 +225,6 @@ def symbol_actual_for_aircraft(problem: SygusProblem, symbol: SygusSymbol, aircr
     return symbol.actual
 
 
-# Function to build the rule-argument vector for one aircraft.
 def rule_args_for_aircraft(
     problem: SygusProblem,
     aircraft: str,
@@ -363,7 +236,6 @@ def rule_args_for_aircraft(
     ]
 
 
-# Function to instantiate the synthesized rule over all aircraft in the context.
 def rule_instances(
     problem: SygusProblem,
     rule,
@@ -375,7 +247,6 @@ def rule_instances(
     ]
 
 
-# Function to declare synthesized witness constants used for non-vacuity.
 def synthesize_witnesses(problem: SygusProblem) -> tuple[object, ...]:
     solver = problem.env.solver
     witness_sort = problem.ctx.real_sort
@@ -385,7 +256,6 @@ def synthesize_witnesses(problem: SygusProblem) -> tuple[object, ...]:
     )
 
 
-# Function to apply a sequence of substitutions over a term.
 def substitute_all(term, substitutions: tuple[tuple[object, object], ...]):
     current = term
     for old, new in substitutions:
@@ -393,7 +263,6 @@ def substitute_all(term, substitutions: tuple[tuple[object, object], ...]):
     return current
 
 
-# Function to pair each witness symbol with its synthesized witness term.
 def witness_substitutions(
     witness_symbols: tuple[WitnessSymbol, ...],
     witnesses: tuple[object, ...],
@@ -404,7 +273,6 @@ def witness_substitutions(
     )
 
 
-# Function to add the non-vacuity synthesis constraint.
 def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[object, ...]) -> None:
     env = problem.env
     solver = env.solver
@@ -423,13 +291,15 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
     solver.addSygusConstraint(nonvacuity)
 
 
-# Function to synthesize a pruning rule under safety and optional non-vacuity constraints.
-def synthesize_pruning_rule(problem: SygusProblem, require_nonvacuous: bool = True, max_conjuncts: int = 5) -> SynthesisResult:
+def synthesize_pruning_rule(
+    problem: SygusProblem,
+    grammar,
+    require_nonvacuous: bool = True,
+) -> SynthesisResult:
     env = problem.env
     solver = env.solver
     symbols = problem.symbols
 
-    grammar = make_pruning_rule_grammar(env, symbols, max_conjuncts)
     rule = solver.synthFun("prune", [symbol.formal for symbol in symbols], env.bool_sort, grammar)
     witnesses = synthesize_witnesses(problem) if require_nonvacuous else ()
 
@@ -457,26 +327,3 @@ def synthesize_pruning_rule(problem: SygusProblem, require_nonvacuous: bool = Tr
         witness_terms = list(witnesses)
         witness_solution = synth_solutions_to_string(witness_terms, solver.getSynthSolutions(witness_terms))
     return SynthesisResult(problem, rule, witnesses, check, rule_solution, witness_solution)
-
-
-# Function to run synthesis with top-level configuration constants.
-def main() -> None:
-    log(f"Configuration: Objective = {OBJECTIVE}, Timeout = {int(TIMEOUT_MS * 0.001):,}s, ")
-    problem = make_rsp_swap_problem(timeout_ms=TIMEOUT_MS, objective_name=OBJECTIVE)
-
-    log(f"Symbol Set: [{', '.join(symbol.name.replace("_", "") for symbol in problem.symbols)}]")
-    result = synthesize_pruning_rule(
-        problem,
-        require_nonvacuous=REQUIRE_NONVACUOUS,
-        max_conjuncts=MAX_CONJUNCTS,
-    )
-
-    log(f"Non-vacuity witness: {'Synthesized' if REQUIRE_NONVACUOUS else 'Disabled'}")
-    if result.rule_solution is not None:
-        print(result.rule_solution)
-    if SHOW_WITNESS and result.witness_solution is not None:
-        print(result.witness_solution)
-
-
-if __name__ == "__main__":
-    main()
