@@ -7,7 +7,6 @@ from synthesis.synth import synthesize_pruning_rule
 
 OBJECTIVE = "delay"
 TIMEOUT_MS = 900_000
-MAX_CONJUNCTS = 3
 REQUIRE_NONVACUOUS = True
 SHOW_WITNESS = False
 
@@ -17,7 +16,7 @@ def main() -> None:
     problem = make_rsp_swap_problem(timeout_ms=TIMEOUT_MS, objective_name=OBJECTIVE)
 
     log(f"Symbol Set: [{', '.join(symbol.name.replace('_', '') for symbol in problem.symbols)}]")
-    grammar = make_pruning_rule_grammar(problem.env, problem.symbols, MAX_CONJUNCTS)
+    grammar = make_pruning_rule_grammar(problem.env, problem.symbols)
     result = synthesize_pruning_rule(
         problem,
         grammar=grammar,

@@ -12,8 +12,8 @@ from core.context import RSPContext
 from core.context import RSPSequenceContext
 from core.context import add_terms
 from core.context import make_context
-from synthesis.grammar import SygusSymbol
-from synthesis.grammar import make_allowed_symbols
+from synthesis.grammar import Terminal
+from synthesis.symbols import make_allowed_symbols
 
 
 def and_terms(solver: cvc5.Solver, *terms):
@@ -102,7 +102,7 @@ class SygusProblem:
     env: SygusEnv
     ctx: RSPContext
     objective: ObjectiveComponent
-    symbols: tuple[SygusSymbol, ...]
+    symbols: tuple[Terminal, ...]
     background_constraints: tuple[object, ...] = ()
     witness_symbols: tuple[WitnessSymbol, ...] = ()
     seq_ij: tuple[str, ...] | None = None
@@ -211,7 +211,7 @@ def apply_rule(env: SygusEnv, rule, args: list[object]):
     return env.solver.mkTerm(Kind.APPLY_UF, rule, *args)
 
 
-def symbol_actual_for_aircraft(problem: SygusProblem, symbol: SygusSymbol, aircraft: str):
+def symbol_actual_for_aircraft(problem: SygusProblem, symbol: Terminal, aircraft: str):
     if symbol.name == "D_i_x":
         return problem.ctx.delta[("i", aircraft)]
     if symbol.name == "D_j_x":
