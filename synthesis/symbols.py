@@ -1,4 +1,5 @@
 from core import RSPContext
+from core import RSPSequenceContext
 from synthesis import Terminal
 
 _SYGUS_SCHEMA_FIELDS = (
@@ -20,7 +21,11 @@ _SYGUS_SCHEMA_FIELDS = (
 _SYGUS_DELTA_FIELDS = ("D_i_x", "D_j_x", "D_x_i", "D_x_j")
 
 
-def make_allowed_symbols(ctx: RSPContext) -> tuple[Terminal, ...]:
+def make_allowed_symbols(
+    ctx: RSPContext,
+    s_ij: RSPSequenceContext,
+    s_ji: RSPSequenceContext,
+) -> tuple[Terminal, ...]:
     lifted = tuple(
         map(
             lambda spec: Terminal(name=spec[0], formal=ctx.solver.mkVar(ctx.real_sort, spec[0]), actual=getattr(ctx, spec[1])[spec[2]]),
@@ -33,4 +38,10 @@ def make_allowed_symbols(ctx: RSPContext) -> tuple[Terminal, ...]:
             _SYGUS_DELTA_FIELDS,
         )
     )
-    return lifted + delta
+    takeoff = (
+        Terminal(name="T_i", formal=ctx.solver.mkVar(ctx.real_sort, "T_i"), actual=s_ij.takeoff["i"]),
+        Terminal(name="T_j", formal=ctx.solver.mkVar(ctx.real_sort, "T_j"), actual=s_ij.takeoff["j"]),
+        Terminal(name="T'_i", formal=ctx.solver.mkVar(ctx.real_sort, "T'_i"), actual=s_ji.takeoff["i"]),
+        Terminal(name="T'_j", formal=ctx.solver.mkVar(ctx.real_sort, "T'_j"), actual=s_ji.takeoff["j"]),
+    )
+    return lifted + delta + takeoff

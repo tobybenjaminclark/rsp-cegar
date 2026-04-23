@@ -32,7 +32,11 @@ def main() -> None:
     flat = lambda xs: [y for x in xs for y in (flat(x) if isinstance(x, list) else [x])]
     names = set(by_name)
 
-    prefixes = sorted({name[:-2] for name in names if name.endswith("_i") and not name.startswith("D_")})
+    prefixes = sorted({
+        name[:-2]
+        for name in names
+        if name.endswith("_i") and not name.startswith("D_") and not name.startswith("T")
+    })
     comparable_pairs = [
         *[(f"{p}_i", f"{p}_j") for p in prefixes if f"{p}_j" in names],
         *[pair for pair in (("D_i_x", "D_j_x"), ("D_x_i", "D_x_j")) if pair[0] in names and pair[1] in names],

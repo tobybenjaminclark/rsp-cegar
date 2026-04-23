@@ -138,7 +138,7 @@ def make_rsp_swap_problem(
     s_ji = ctx.with_sequence(seq_ji)
 
     objective = make_rsp_objective(s_ij, s_ji, objective_name)
-    symbols = make_allowed_symbols(ctx)
+    symbols = make_allowed_symbols(ctx, s_ij, s_ji)
     witness_symbols = make_context_witness_symbols(ctx)
     background_constraints = tuple(ctx.foundational_constraints)
     return SygusProblem(
