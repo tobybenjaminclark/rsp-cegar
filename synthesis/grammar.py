@@ -22,15 +22,9 @@ SMT_ENV: dict[str, dict[str, object]] = {
 }
 
 
-def set_smt_env(
-    *,
-    symbol_table: dict[str, object] | None = None,
-    nonterminal_table: dict[str, object] | None = None,
-) -> None:
-    if symbol_table is not None:
-        SMT_ENV["symbol_table"] = dict(symbol_table)
-    if nonterminal_table is not None:
-        SMT_ENV["nonterminal_table"] = dict(nonterminal_table)
+def set_smt_env(*, symbol_table: dict[str, object] | None = None, nonterminal_table: dict[str, object] | None = None,) -> None:
+    if symbol_table is not None:        SMT_ENV["symbol_table"] = dict(symbol_table)
+    if nonterminal_table is not None:   SMT_ENV["nonterminal_table"] = dict(nonterminal_table)
 
 
 class Expr(SMTConvertible):
@@ -211,36 +205,3 @@ class Grammar(SMTConvertible):
             )
         )
         return grammar
-
-
-def make_pruning_rule_grammar(env, symbols: tuple[Terminal, ...]):
-    cond = NonTerminal("Rule")
-    x = NonTerminal("Atom")
-
-    by_name = {symbol.name: symbol for symbol in symbols}
-    names = set(by_name)
-
-    prefixes = sorted({name[:-2] for name in names if name.endswith("_i") and not name.startswith("D_")})
-    comparable_pairs = [
-        *[(f"{p}_i", f"{p}_j") for p in prefixes if f"{p}_j" in names],
-        *[pair for pair in (("D_i_x", "D_j_x"), ("D_x_i", "D_x_j")) if pair[0] in names and pair[1] in names],
-    ]
-    atom_alts = [[by_name[l] <= by_name[r], by_name[r] <= by_name[l], by_name[l].eq(by_name[r])] for l, r in comparable_pairs ]
-    flat = lambda xs: [y for x in xs for y in (flat(x) if isinstance(x, list) else [x])]
-
-    grammar = Grammar(
-        nonterminals=(cond, x),
-        terminals=symbols,
-        start=cond,
-        productions=(
-            cond >> (x | (x & x) | (x & x & x)),
-            x >> Choice(tuple(flat(atom_alts))),
-        ),
-    )
-    symbol_table = dict(map(lambda symbol: (symbol.name, symbol.formal), symbols))
-    nonterminal_table = {
-        "Rule": env.solver.mkVar(env.bool_sort, "Rule"),
-        "Atom": env.solver.mkVar(env.bool_sort, "Atom"),
-    }
-    set_smt_env(symbol_table=symbol_table, nonterminal_table=nonterminal_table)
-    return grammar.to_cvc5(env.solver)

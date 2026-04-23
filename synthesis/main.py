@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from synthesis.grammar import make_pruning_rule_grammar
+from synthesis.grammar import Choice
+from synthesis.grammar import Grammar
+from synthesis.grammar import NonTerminal
+from synthesis.grammar import set_smt_env
 from synthesis.synth import log
 from synthesis.synth import make_rsp_swap_problem
 from synthesis.synth import synthesize_pruning_rule
@@ -12,11 +15,52 @@ SHOW_WITNESS = False
 
 
 def main() -> None:
+
     log(f"Configuration: Objective = {OBJECTIVE}, Timeout = {int(TIMEOUT_MS * 0.001):,}s, ")
     problem = make_rsp_swap_problem(timeout_ms=TIMEOUT_MS, objective_name=OBJECTIVE)
 
     log(f"Symbol Set: [{', '.join(symbol.name.replace('_', '') for symbol in problem.symbols)}]")
-    grammar = make_pruning_rule_grammar(problem.env, problem.symbols)
+
+    #
+    # Construct the grammar.
+    #
+
+    conj = NonTerminal("Rule")
+    cmp = NonTerminal("Atom")
+
+    by_name = {symbol.name: symbol for symbol in problem.symbols}
+
+    flat = lambda xs: [y for x in xs for y in (flat(x) if isinstance(x, list) else [x])]
+    names = set(by_name)
+
+    prefixes = sorted({name[:-2] for name in names if name.endswith("_i") and not name.startswith("D_")})
+    comparable_pairs = [
+        *[(f"{p}_i", f"{p}_j") for p in prefixes if f"{p}_j" in names],
+        *[pair for pair in (("D_i_x", "D_j_x"), ("D_x_i", "D_x_j")) if pair[0] in names and pair[1] in names],
+    ]
+
+    grammar = Grammar(
+        nonterminals=(conj, cmp),
+        terminals=problem.symbols,
+        start=conj,
+        productions=(
+            conj >> (cmp | (cmp & cmp) | (cmp & cmp & cmp)),
+            cmp >> Choice(tuple(flat(
+                [[by_name[l] <= by_name[r], by_name[r] <= by_name[l], by_name[l].eq(by_name[r])] for l, r in comparable_pairs]
+            ))),
+        ),
+    )
+
+    set_smt_env(
+        symbol_table={symbol.name: symbol.formal for symbol in problem.symbols},
+        nonterminal_table={
+            "Rule": problem.env.solver.mkVar(problem.env.bool_sort, "Rule"),
+            "Atom": problem.env.solver.mkVar(problem.env.bool_sort, "Atom"),
+        },
+    )
+
+    grammar = grammar.to_cvc5(problem.env.solver)
+
     result = synthesize_pruning_rule(
         problem,
         grammar=grammar,
