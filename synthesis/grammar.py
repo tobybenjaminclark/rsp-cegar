@@ -31,9 +31,10 @@ class Expr(SMTConvertible, Rebindable):
         if isinstance(self, Choice): return self.__or__(other)
         return Choice((self, other))
 
-    # Operator overloads for ^ + <= =
+    # Operator overloads for ^ + - <= =
     def __and__(self, other: Expr) -> "And":    return And(self.terms + (other,)) if isinstance(self, And) else And((self, other))
     def __add__(self, other: Expr) -> "Add":    return Add(self.terms + (other,)) if isinstance(self, Add) else Add((self, other))
+    def __sub__(self, other: Expr) -> "Sub":    return Sub(self, other)
     def __le__(self, other: Expr) -> "Leq":     return Leq(self, other)
     def eq(self, other: Expr) -> "Eq":          return Eq(self, other)
 
@@ -164,6 +165,19 @@ class Add(Expr):
         if not compiled:        return solver.mkInteger(0)
         if len(compiled) == 1:  return compiled[0]
         return solver.mkTerm(Kind.ADD, *compiled)
+
+
+
+@dataclass(frozen=True)
+class Sub(Expr):
+    left: Expr
+    right: Expr
+
+    def __iter__(self) -> Iterator["Expr"]:
+        return iter((self.left, self.right))
+
+    def to_cvc5(self, solver: cvc5.Solver) -> object:
+        return solver.mkTerm(Kind.SUB, self.left.to_cvc5(solver), self.right.to_cvc5(solver))
 
 
 

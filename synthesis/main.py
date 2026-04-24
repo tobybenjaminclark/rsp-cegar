@@ -26,8 +26,19 @@ def main() -> None:
     #
     conj = NonTerminal("Rule", sort = problem.env.bool_sort)
     cmp = NonTerminal("Atom", sort = problem.env.bool_sort)
+    aexp = NonTerminal("AExpr", sort = problem.env.real_sort)
+    dt = NonTerminal("Dt", sort = problem.env.real_sort)
 
     by_name = {symbol.name: symbol for symbol in problem.symbols}
+    objective_term_names = (
+        "T_i",
+        "T_j",
+        "T'_i",
+        "T'_j",
+        "B_i",
+        "B_j",
+    )
+    objective_terms = tuple(by_name[name] for name in objective_term_names if name in by_name)
 
     flat = lambda xs: [y for x in xs for y in (flat(x) if isinstance(x, list) else [x])]
     names = set(by_name)
@@ -43,14 +54,21 @@ def main() -> None:
     ]
 
     grammar = Grammar(
-        nonterminals=(conj, cmp),
+        nonterminals=(conj, cmp, aexp, dt),
         terminals=problem.symbols,
         start=conj,
         productions=(
             conj >> (cmp | (cmp & cmp) | (cmp & cmp & cmp)),
-            cmp >> Choice(tuple(flat(
+            cmp >> (Choice(tuple(flat(
                 [[by_name[l] <= by_name[r], by_name[r] <= by_name[l], by_name[l].eq(by_name[r])] for l, r in comparable_pairs]
-            ))),
+            ))) | (aexp <= aexp) | aexp.eq(aexp)),
+            aexp >> (Choice(objective_terms) | dt | (aexp + aexp) | (aexp - aexp)),
+            dt >> (
+                (by_name["T_i"] - by_name["B_i"])
+                | (by_name["T'_i"] - by_name["B_i"])
+                | (by_name["T_j"] - by_name["B_j"])
+                | (by_name["T'_j"] - by_name["B_j"])
+            ),
         ),
     )
 
