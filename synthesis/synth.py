@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import sys
 from dataclasses import dataclass
 from functools import reduce
 from typing import Iterable, Sequence
@@ -30,7 +31,11 @@ def or_terms(solver: cvc5.Solver, *terms):
 
 def log(message: str) -> None:
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    print(f"[{timestamp}] {message}", flush=True)
+    print(f"[{timestamp}] {message}", file=sys.stdout, flush=True)
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
 
 
 def define_fun_to_string(f: object, params: Iterable[object], body: object) -> str:
@@ -291,11 +296,10 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
     solver.addSygusConstraint(nonvacuity)
 
 
-def synthesize_pruning_rule(
-    problem: SygusProblem,
-    grammar,
-    require_nonvacuous: bool = True,
-) -> SynthesisResult:
+def synthesize_pruning_rule(problem: SygusProblem, grammar, require_nonvacuous: bool = True,) -> SynthesisResult:
+
+    log("Invoking Synthesis (This may take some time)")
+
     env = problem.env
     solver = env.solver
     symbols = problem.symbols
@@ -315,10 +319,11 @@ def synthesize_pruning_rule(
     if require_nonvacuous:
         add_nonvacuity_constraint(problem, rule, witnesses)
 
-    log("Invoking Synthesis (This may take some time)")
+
     check = solver.checkSynth()
-    log(f"Synthesis Complete, Result: {check}")
+
     if not check.hasSolution():
+        log(f"Synthesis Failed, Result: {check}")
         return SynthesisResult(problem, rule, witnesses, check, None, None)
 
     rule_solution = synth_solutions_to_string([rule], solver.getSynthSolutions([rule]))
@@ -326,4 +331,8 @@ def synthesize_pruning_rule(
     if witnesses:
         witness_terms = list(witnesses)
         witness_solution = synth_solutions_to_string(witness_terms, solver.getSynthSolutions(witness_terms))
-    return SynthesisResult(problem, rule, witnesses, check, rule_solution, witness_solution)
+
+    result = SynthesisResult(problem, rule, witnesses, check, rule_solution, witness_solution)
+    log(f"Synthesis Complete, Result: {check}:\n\n{result.rule_solution}")
+
+    return result

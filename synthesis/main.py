@@ -78,6 +78,7 @@ def main() -> None:
     set_smt_env(
         symbol_table={symbol.name: symbol.formal for symbol in problem.symbols},
     )
+
     grammar = grammar.to_cvc5(problem.env.solver)
 
 
@@ -89,12 +90,6 @@ def main() -> None:
         grammar=grammar,
         require_nonvacuous=REQUIRE_NONVACUOUS,
     )
-
-    log(f"Non-vacuity witness: {'Synthesized' if REQUIRE_NONVACUOUS else 'Disabled'}")
-    if result.rule_solution is not None:
-        print(result.rule_solution)
-    if SHOW_WITNESS and result.witness_solution is not None:
-        print(result.witness_solution)
 
 
 if __name__ == "__main__":
