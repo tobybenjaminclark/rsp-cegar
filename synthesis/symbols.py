@@ -21,11 +21,7 @@ _SYGUS_SCHEMA_FIELDS = (
 _SYGUS_DELTA_FIELDS = ("D_i_x", "D_j_x", "D_x_i", "D_x_j")
 
 
-def make_allowed_symbols(
-    ctx: RSPContext,
-    s_ij: RSPSequenceContext,
-    s_ji: RSPSequenceContext,
-) -> tuple[Terminal, ...]:
+def make_allowed_symbols(ctx: RSPContext,s_ij: RSPSequenceContext, s_ji: RSPSequenceContext) -> tuple[Terminal, ...]:
     lifted = tuple(
         map(
             lambda spec: Terminal(name=spec[0], formal=ctx.solver.mkVar(ctx.real_sort, spec[0]), actual=getattr(ctx, spec[1])[spec[2]]),
