@@ -124,10 +124,7 @@ class SynthesisResult:
     witness_solution: str | None
 
 
-def make_rsp_swap_problem(
-    timeout_ms: int = 10_000,
-    objective_name: str = "makespan",
-) -> SygusProblem:
+def make_rsp_swap_problem(timeout_ms: int = 10_000, objective_name: str = "makespan") -> SygusProblem:
     seq_ij = ("a", "i", "b", "j", "c")
     seq_ji = ("a", "j", "b", "i", "c")
     env = SygusEnv(timeout_ms=timeout_ms)
@@ -158,11 +155,7 @@ def make_rsp_swap_problem(
     )
 
 
-def make_rsp_objective(
-    s_ij: RSPSequenceContext,
-    s_ji: RSPSequenceContext,
-    objective_name: str,
-) -> ObjectiveComponent:
+def make_rsp_objective(s_ij: RSPSequenceContext,s_ji: RSPSequenceContext,objective_name: str,) -> ObjectiveComponent:
     solver = s_ij.ctx.solver
 
     if objective_name == "makespan":
@@ -178,6 +171,13 @@ def make_rsp_objective(
             name="total delay",
             left=add_terms(solver, *(s_ij.delay[plane] for plane in s_ij.ctx.aircraft)),
             right=add_terms(solver, *(s_ji.delay[plane] for plane in s_ij.ctx.aircraft)),
+        )
+
+    if objective_name == "delay+ctot":
+        return ObjectiveComponent(
+            name="total delay+ctot",
+            left=add_terms(solver, *(s_ij.ctot[plane] + s_ij.delay[plane] for plane in s_ij.ctx.aircraft)),
+            right=add_terms(solver, *(s_ji.ctot[plane] + s_ji.delay[plane] for plane in s_ji.ctx.aircraft)),
         )
 
     raise ValueError(f"Unknown objective: {objective_name}")
