@@ -13,7 +13,9 @@ from core.context import RSPContext
 from core.context import RSPSequenceContext
 from core.context import add_terms
 from core.context import make_context
+from synthesis.grammar import Grammar
 from synthesis.grammar import Terminal
+from synthesis.grammar import set_smt_env
 from synthesis.symbols import make_allowed_symbols
 
 
@@ -176,8 +178,8 @@ def make_rsp_objective(s_ij: RSPSequenceContext,s_ji: RSPSequenceContext,objecti
     if objective_name == "delay+ctot":
         return ObjectiveComponent(
             name="total delay+ctot",
-            left=add_terms(solver, *(s_ij.ctot[plane] + s_ij.delay[plane] for plane in s_ij.ctx.aircraft)),
-            right=add_terms(solver, *(s_ji.ctot[plane] + s_ji.delay[plane] for plane in s_ji.ctx.aircraft)),
+            left=add_terms(solver, *(add_terms(solver, s_ij.ctot[plane], s_ij.delay[plane]) for plane in s_ij.ctx.aircraft)),
+            right=add_terms(solver, *(add_terms(solver, s_ji.ctot[plane], s_ji.delay[plane]) for plane in s_ji.ctx.aircraft)),
         )
 
     raise ValueError(f"Unknown objective: {objective_name}")
@@ -232,22 +234,29 @@ def symbol_actual_for_aircraft(problem: SygusProblem, symbol: Terminal, aircraft
 
 def rule_args_for_aircraft(
     problem: SygusProblem,
+    symbols: tuple[Terminal, ...],
     aircraft: str,
     substitutions: tuple[tuple[object, object], ...] = (),
 ) -> list[object]:
     return [
         substitute_all(symbol_actual_for_aircraft(problem, symbol, aircraft), substitutions)
-        for symbol in problem.symbols
+        for symbol in symbols
     ]
 
 
 def rule_instances(
     problem: SygusProblem,
-    rule,
+    symbols_or_rule,
+    rule=None,
     substitutions: tuple[tuple[object, object], ...] = (),
 ) -> list[object]:
+    if rule is None:
+        symbols = problem.symbols
+        rule = symbols_or_rule
+    else:
+        symbols = symbols_or_rule
     return [
-        apply_rule(problem.env, rule, rule_args_for_aircraft(problem, aircraft, substitutions))
+        apply_rule(problem.env, rule, rule_args_for_aircraft(problem, symbols, aircraft, substitutions))
         for aircraft in problem.ctx.aircraft
     ]
 
@@ -278,7 +287,12 @@ def witness_substitutions(
     )
 
 
-def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[object, ...]) -> None:
+def add_nonvacuity_constraint(
+    problem: SygusProblem,
+    symbols: tuple[Terminal, ...],
+    rule,
+    witnesses: tuple[object, ...],
+) -> None:
     env = problem.env
     solver = env.solver
     substitutions = witness_substitutions(problem.witness_symbols, witnesses)
@@ -286,7 +300,7 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
         substitute_all(constraint, substitutions)
         for constraint in problem.background_constraints
     ]
-    witness_rule_instances = rule_instances(problem, rule, substitutions)
+    witness_rule_instances = rule_instances(problem, symbols, rule, substitutions)
 
     nonvacuity = and_terms(
         solver,
@@ -296,18 +310,41 @@ def add_nonvacuity_constraint(problem: SygusProblem, rule, witnesses: tuple[obje
     solver.addSygusConstraint(nonvacuity)
 
 
-def synthesize_pruning_rule(problem: SygusProblem, grammar, require_nonvacuous: bool = True,) -> SynthesisResult:
+def synthesize_pruning_rule(
+    problem: SygusProblem,
+    grammar,
+    require_nonvacuous: bool = True,
+    symbols: tuple[Terminal, ...] | None = None,
+) -> SynthesisResult:
 
     log("Invoking Synthesis (This may take some time)")
 
     env = problem.env
     solver = env.solver
-    symbols = problem.symbols
+    if symbols is None:
+        if hasattr(grammar, "terminals_in_use"):
+            symbols = grammar.terminals_in_use()
+        else:
+            symbols = problem.symbols
+
+    if isinstance(grammar, Grammar):
+        grammar = Grammar(
+            nonterminals=grammar.nonterminals,
+            terminals=symbols,
+            start=grammar.start,
+            productions=grammar.productions,
+        )
+
+    set_smt_env(symbol_table={symbol.name: symbol.formal for symbol in symbols})
+    log(f"Symbol Set: [{', '.join(symbol.name.replace('_', '') for symbol in symbols)}]")
+
+    if hasattr(grammar, "to_cvc5"):
+        grammar = grammar.to_cvc5(problem.env.solver)
 
     rule = solver.synthFun("prune", [symbol.formal for symbol in symbols], env.bool_sort, grammar)
     witnesses = synthesize_witnesses(problem) if require_nonvacuous else ()
 
-    rule_on_rsp_vars = and_terms(solver, *rule_instances(problem, rule))
+    rule_on_rsp_vars = and_terms(solver, *rule_instances(problem, symbols, rule))
     valid_rsp = and_terms(solver, *problem.background_constraints)
     safety = or_terms(
         solver,
@@ -317,13 +354,13 @@ def synthesize_pruning_rule(problem: SygusProblem, grammar, require_nonvacuous: 
     solver.addSygusConstraint(safety)
 
     if require_nonvacuous:
-        add_nonvacuity_constraint(problem, rule, witnesses)
+        add_nonvacuity_constraint(problem, symbols, rule, witnesses)
 
 
     check = solver.checkSynth()
 
     if not check.hasSolution():
-        log(f"Synthesis Failed, Result: {check}")
+        log("Synthesis failed to find a solution.")
         return SynthesisResult(problem, rule, witnesses, check, None, None)
 
     rule_solution = synth_solutions_to_string([rule], solver.getSynthSolutions([rule]))

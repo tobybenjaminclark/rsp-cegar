@@ -294,6 +294,24 @@ class Grammar(SMTConvertible):
     def reduce_productions(self, fn, init):
         return reduce(fn, self.productions, init)
 
+    def terminals_in_use(self) -> tuple[Terminal, ...]:
+        seen: set[str] = set()
+        used: list[Terminal] = []
+
+        def visit(expr: Expr) -> None:
+            if isinstance(expr, Terminal):
+                if expr.name not in seen:
+                    seen.add(expr.name)
+                    used.append(expr)
+                return
+            for child in expr:
+                visit(child)
+
+        for production in self.productions:
+            visit(production)
+
+        return tuple(used)
+
     def __str__(self) -> str:
         return self.vis()
 

@@ -40,4 +40,16 @@ def make_allowed_symbols(ctx: RSPContext,s_ij: RSPSequenceContext, s_ji: RSPSequ
         Terminal(name="T'_i", formal=ctx.solver.mkVar(ctx.real_sort, "T'_i"), actual=s_ji.takeoff["i"]),
         Terminal(name="T'_j", formal=ctx.solver.mkVar(ctx.real_sort, "T'_j"), actual=s_ji.takeoff["j"]),
     )
-    return lifted + delta + takeoff
+    delay = (
+        Terminal(name="DELAY_i", formal=ctx.solver.mkVar(ctx.real_sort, "DELAY_i"), actual=s_ij.delay["i"]),
+        Terminal(name="DELAY_j", formal=ctx.solver.mkVar(ctx.real_sort, "DELAY_j"), actual=s_ij.delay["j"]),
+        Terminal(name="DELAY'_i", formal=ctx.solver.mkVar(ctx.real_sort, "DELAY'_i"), actual=s_ji.delay["i"]),
+        Terminal(name="DELAY'_j", formal=ctx.solver.mkVar(ctx.real_sort, "DELAY'_j"), actual=s_ji.delay["j"]),
+    )
+    ctot = (
+        Terminal(name="CTOT_i", formal=ctx.solver.mkVar(ctx.real_sort, "CTOT_i"), actual=s_ij.ctot["i"]),
+        Terminal(name="CTOT_j", formal=ctx.solver.mkVar(ctx.real_sort, "CTOT_j"), actual=s_ij.ctot["j"]),
+        Terminal(name="CTOT'_i", formal=ctx.solver.mkVar(ctx.real_sort, "CTOT'_i"), actual=s_ji.ctot["i"]),
+        Terminal(name="CTOT'_j", formal=ctx.solver.mkVar(ctx.real_sort, "CTOT'_j"), actual=s_ji.ctot["j"]),
+    )
+    return lifted + delta + takeoff + delay + ctot
