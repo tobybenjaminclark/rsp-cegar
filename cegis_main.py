@@ -2,32 +2,76 @@ from __future__ import annotations
 
 from cegis.ast import set_symbol_universe
 from cegis.cegis import CEGIS
-from cegis.seeds import synthesise_complete_order_seed
+from cegis.seeds import seed_from_synthesis_result
 from cegis.verifier import CompleteOrderVerifier
+from synthesis.grammar import *
+from synthesis.synth import *
+from synthesis import *
 
 
-MAX_ROUNDS = 100
-STARTING_POPULATION = 10
-GENERATIONS = 30
+MAX_ROUNDS = 10
+STARTING_POPULATION = 5
+GENERATIONS = 5
 ELITE = 5
 TARGET_SOLUTIONS = 10
 SYGUS_TIMEOUT_MS = 10_000
 SYGUS_OBJECTIVE = "makespan"
 
 
+def flat(xs):
+    return [y for x in xs for y in (flat(x) if isinstance(x, list) else [x])]
+
+
 def main() -> int:
-    if ELITE > STARTING_POPULATION:
-        raise ValueError("ELITE cannot be greater than STARTING_POPULATION.")
 
     verifier = CompleteOrderVerifier()
     set_symbol_universe(verifier.symbol_set())
-    seed_rules = [
-        synthesise_complete_order_seed(
-            verifier,
-            timeout_ms=SYGUS_TIMEOUT_MS,
-            objective_name=SYGUS_OBJECTIVE,
-        )
+
+    problem = make_rsp_swap_problem(timeout_ms=SYGUS_TIMEOUT_MS, objective_name=SYGUS_OBJECTIVE)
+
+    # Construct the grammar.
+    conj = NonTerminal("Rule", sort=problem.env.bool_sort)
+    cmp = NonTerminal("Atom", sort=problem.env.bool_sort)
+
+    by_name = {symbol.name: symbol for symbol in problem.symbols}
+    names = set(by_name)
+
+    prefixes = sorted({
+        name[:-2]
+        for name in names
+        if name.endswith("_i") and not name.startswith(("D_", "CTOT", "DELAY")) and name[:-2] != "T"
+    })
+    comparable_pairs = [
+        *[(f"{p}_i", f"{p}_j") for p in prefixes if f"{p}_j" in names],
+        *[
+            pair
+            for pair in (("D_i_x", "D_j_x"), ("D_x_i", "D_x_j"))
+            if pair[0] in names and pair[1] in names
+        ],
     ]
+
+    grammar = Grammar(
+        nonterminals=(conj, cmp),
+        terminals=problem.symbols,
+        start=conj,
+        productions=(
+            conj >> (cmp | (cmp & cmp) | (cmp & cmp & cmp) | (cmp & cmp & cmp & cmp)),
+            cmp >> Choice(tuple(flat(
+                [[by_name[l] <= by_name[r], by_name[r] <= by_name[l], by_name[l].eq(by_name[r])]
+                 for l, r in comparable_pairs]
+            ))),
+        ),
+    )
+    log(f"Visualising Context-Free Grammar for SyGuS:\n\n{grammar.vis()}\n")
+
+    # Run Synthesis
+    result = synthesize_pruning_rule(
+        problem,
+        grammar=grammar,
+        require_nonvacuous=True,
+    )
+
+    seed_rules = [seed_from_synthesis_result(verifier, result)]
 
     cegis = CEGIS(
         verifier,
@@ -46,7 +90,7 @@ def main() -> int:
 
     print("\nGenerated & Verified Pruning Conditions:")
     for rule in rules:
-        print(f"\t*\t{rule}")
+        print(f" ► {rule}")
     return 0
 
 

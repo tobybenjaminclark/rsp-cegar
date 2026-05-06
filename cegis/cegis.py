@@ -25,7 +25,6 @@ class CEGIS:
         self.elite = elite
         self.target_solutions = target_solutions
 
-        self.Σ = []
         self.verified_rules = set()
         self.seed_rules = list(seed_rules or [])
         self.pop = list(seed_rules or [])
@@ -44,25 +43,21 @@ class CEGIS:
                 tqdm.write(" ► Seed rule is 𝗦𝗢𝗨𝗡𝗗 (saving as verified solution)")
                 self.verified_rules.add(seed)
                 continue
-            if verification.counterexample is not None:
-                tqdm.write(" ► Seed rule is 𝗨𝗡𝗦𝗢𝗨𝗡𝗗 (appending counter-example into Σ*)")
-                self.Σ.append((verification.counterexample, False))
-                continue
-            tqdm.write(" ► Seed rule could not be classified by cvc5 (keeping as search seed only)")
+            tqdm.write(" ► Seed rule is not sound (removing from search seeds)")
+            self.seed_rules = [rule for rule in self.seed_rules if str(rule) != str(seed)]
+            self.pop = [rule for rule in self.pop if str(rule) != str(seed)]
 
     def round(self):
         self.round_number += 1
 
-        tqdm.write(f"\n𝗖𝗼𝘂𝗻𝘁𝗲𝗿 𝗘𝘅𝗮𝗺𝗽𝗹𝗲 𝗚𝘂𝗶𝗱𝗲𝗱 𝗜𝗻𝗱𝘂𝗰𝘁𝗶𝘃𝗲 𝗦𝘆𝗻𝘁𝗵𝗲𝘀𝗶𝘀 | Round {self.round_number} of {self.max_rounds} | Solutions Found: {len(self.verified_rules)} of {self.target_solutions} | Σ* contains {len(self.Σ)} counterexamples")
+        tqdm.write(f"\n𝗩𝗲𝗿𝗶𝗳𝗶𝗲𝗱 𝗟𝗮𝘁𝘁𝗶𝗰𝗲 𝗪𝗲𝗮𝗸𝗲𝗻𝗶𝗻𝗴 | Round {self.round_number} of {self.max_rounds} | Solutions Found: {len(self.verified_rules)} of {self.target_solutions}")
 
-        best, best_score, pop = ProgramSearch.search(
+        pop = ProgramSearch.search(
             start=self.starting,
             gens=self.generations,
-            elite=self.elite,
-            Σ=self.Σ,
             pop=self.pop,
-            antiduplication=False,
             seed_rules=self.seed_rules,
+            verifier=self.verifier,
         )
 
         self.pop = pop
@@ -70,39 +65,15 @@ class CEGIS:
             if seed not in self.pop:
                 self.pop.append(seed)
 
-        fitpop = ProgramSearch.fitness(self.pop, self.Σ)
+        new_rules = 0
+        for rule in self.pop:
+            before = len(self.verified_rules)
+            self.verified_rules.add(rule)
+            new_rules += len(self.verified_rules) - before
 
-        top3 = sorted(fitpop, key=lambda x: x[1], reverse=True)[:3]
-        for i, (rule, total, sigma, _length_score, entropy_mc) in enumerate(top3, 1):
-            tqdm.write(
-                f" ► [{i}] {str(rule):<40} :: "
-                f" {total:7.4f} | "
-                f"Σ:{sigma:7.4f} + "
-                f"MC:{entropy_mc:7.4f}"
-            )
-
-        if not self.verifier.is_rule_satisfiable(best):
-            tqdm.write(" ► Top rule is 𝗩𝗔𝗖𝗨𝗢𝗨𝗦𝗟𝗬-𝗨𝗡𝗦𝗔𝗧𝗜𝗦𝗙𝗜𝗔𝗕𝗟𝗘 (removing from population)")
-            self.pop = [r for r in self.pop if str(r) != str(best)]
-            return
-
-        verification = self.verifier.verify_rule(best)
-        if verification.is_verified:
-            tqdm.write(" ► Top rule is 𝗦𝗢𝗨𝗡𝗗 (appending rule into verified-solutions)")
-            self.verified_rules.add(best)
-            return
-        if not verification.is_non_vacuous:
-            tqdm.write(" ► Top rule is 𝗩𝗔𝗖𝗨𝗢𝗨𝗦 (removing from population)")
-            self.pop = [r for r in self.pop if str(r) != str(best)]
-            return
-        if verification.counterexample is None:
-            tqdm.write(" ► Top rule could not be classified by cvc5 (removing from population)")
-            self.pop = [r for r in self.pop if str(r) != str(best)]
-            return
-        else:
-            tqdm.write(" ► Top rule is 𝗨𝗡𝗦𝗢𝗨𝗡𝗗 (appending counter-example into Σ*)")
-
-        self.Σ.append((verification.counterexample, False))
+        tqdm.write(f" ► Kept {len(self.pop)} verified-sound weakened candidates ({new_rules} new)")
+        for i, rule in enumerate(self.pop[:3], 1):
+            tqdm.write(f" ► [{i}] {rule}")
 
     def synthesise(self) -> [BooleanExpr]:
         self.verify_seed_rules()

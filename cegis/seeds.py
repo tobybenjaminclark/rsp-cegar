@@ -11,12 +11,7 @@ from .ast import Not
 from .ast import Or
 from .ast import Symbol
 from .verifier import CompleteOrderVerifier
-from synthesis.grammar import Choice
-from synthesis.grammar import Grammar
-from synthesis.grammar import NonTerminal
-from synthesis.synth import log
-from synthesis.synth import make_rsp_swap_problem
-from synthesis.synth import synthesize_pruning_rule
+from synthesis.synth import SynthesisResult
 
 
 def and_all(terms: list[BooleanExpr]) -> BooleanExpr:
@@ -42,52 +37,10 @@ def _flatten_and_terms(terms: list[BooleanExpr]) -> list[BooleanExpr]:
     return flattened
 
 
-def synthesise_complete_order_seed(
+def seed_from_synthesis_result(
     verifier: CompleteOrderVerifier,
-    *,
-    timeout_ms: int = 10_000,
-    objective_name: str = "makespan",
+    result: SynthesisResult,
 ) -> BooleanExpr:
-    problem = make_rsp_swap_problem(timeout_ms=timeout_ms, objective_name=objective_name)
-
-    conj = NonTerminal("Rule", sort=problem.env.bool_sort)
-    cmp = NonTerminal("Atom", sort=problem.env.bool_sort)
-
-    by_name = {symbol.name: symbol for symbol in problem.symbols}
-    names = set(by_name)
-    prefixes = sorted({
-        name[:-2]
-        for name in names
-        if name.endswith("_i") and not name.startswith(("D_", "CTOT", "DELAY")) and name[:-2] != "T"
-    })
-    comparable_pairs = [
-        *[(f"{prefix}_i", f"{prefix}_j") for prefix in prefixes if f"{prefix}_j" in names],
-        *[
-            pair
-            for pair in (("D_i_x", "D_j_x"), ("D_x_i", "D_x_j"))
-            if pair[0] in names and pair[1] in names
-        ],
-    ]
-
-    grammar = Grammar(
-        nonterminals=(conj, cmp),
-        terminals=problem.symbols,
-        start=conj,
-        productions=(
-            conj >> (cmp | (cmp & cmp) | (cmp & cmp & cmp) | (cmp & cmp & cmp & cmp)),
-            cmp >> Choice(tuple(_flatten(
-                [[by_name[left] <= by_name[right], by_name[right] <= by_name[left], by_name[left].eq(by_name[right])]
-                 for left, right in comparable_pairs]
-            ))),
-        ),
-    )
-    log(f"Visualising Context-Free Grammar for SyGuS:\n\n{grammar.vis()}\n")
-
-    result = synthesize_pruning_rule(
-        problem,
-        grammar=grammar,
-        require_nonvacuous=True,
-    )
     if result.rule_solution is None:
         raise RuntimeError(f"SyGuS did not find a seed rule: {result.check}")
 
@@ -96,10 +49,6 @@ def synthesise_complete_order_seed(
         _sexpr_to_cegis_ast(_expand_lets(schema), aircraft=aircraft)
         for aircraft in verifier.aircraft
     ])
-
-
-def _flatten(xs):
-    return [y for x in xs for y in (_flatten(x) if isinstance(x, list) else [x])]
 
 
 def _extract_define_fun_body(solution: str):

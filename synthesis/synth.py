@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 import sys
 from dataclasses import dataclass
 from functools import reduce
@@ -17,6 +18,15 @@ from synthesis.grammar import Grammar
 from synthesis.grammar import Terminal
 from synthesis.grammar import set_smt_env
 from synthesis.symbols import make_allowed_symbols
+
+
+RESET = "\033[0m"
+GRAY = "\033[90m"
+CYAN = "\033[96m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+MAGENTA = "\033[95m"
+BLUE = "\033[94m"
 
 
 def and_terms(solver: cvc5.Solver, *terms):
@@ -62,6 +72,27 @@ def synth_solutions_to_string(terms: Sequence[object], sols: Sequence[object]) -
             for index, term in enumerate(terms)
         )
         + ")"
+    )
+
+
+def highlight_sygus_solution(solution: str, use_color: bool = True) -> str:
+    if not use_color:
+        return solution
+
+    keywords = {"define-fun", "let", "and", "or", "not", "Bool", "Int", "Real"}
+    operators = {"<=", ">=", "<", ">", "=", "+", "-", "*", "/", "=>"}
+    token_colour = lambda token: (
+        f"{GRAY}{token}{RESET}" if token in {"(", ")"} else
+        f"{MAGENTA}{token}{RESET}" if token in keywords else
+        f"{YELLOW}{token}{RESET}" if token in operators else
+        f"{BLUE}{token}{RESET}" if re.fullmatch(r"-?\d+(/\d+)?", token) else
+        f"{GREEN}{token}{RESET}" if token.startswith("_let_") else
+        f"{CYAN}{token}{RESET}" if re.fullmatch(r"[A-Za-z_|'][A-Za-z0-9_|'!?.-]*", token) else
+        token
+    )
+    return "".join(
+        token_colour(token)
+        for token in re.findall(r"\s+|\(|\)|[^\s()]+", solution)
     )
 
 
@@ -370,6 +401,6 @@ def synthesize_pruning_rule(
         witness_solution = synth_solutions_to_string(witness_terms, solver.getSynthSolutions(witness_terms))
 
     result = SynthesisResult(problem, rule, witnesses, check, rule_solution, witness_solution)
-    log(f"Synthesis Complete, Result: {check}:\n\n{result.rule_solution}")
+    log(f"Synthesis Complete, Result: {check}:\n\n{highlight_sygus_solution(result.rule_solution)}\n")
 
     return result
