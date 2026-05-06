@@ -5,9 +5,9 @@ import math
 import sys
 from typing import Optional
 
-from rsp_cegis.cegis import CEGIS
-from rsp_cegis.form import CompleteOrderForm
-from rsp_cegis.pr_ast import set_symbol_universe
+from cegis.cegis import CEGIS
+from cegis.ast import set_symbol_universe
+from cegis.verifier import CompleteOrderVerifier
 
 VERSION = "v1.0.0"
 PROMPT_WIDTH = 70
@@ -132,8 +132,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 # Define a general, high-level run function (dependent on arguments)
 def run(args: argparse.Namespace) -> int:
-    form = CompleteOrderForm()
-    set_symbol_universe(form.symbol_set())
+    verifier = CompleteOrderVerifier()
+    set_symbol_universe(verifier.symbol_set())
 
     # If the program is run interactively, gather arguments in the CLI.
     if args.interactive:
@@ -175,7 +175,7 @@ def run(args: argparse.Namespace) -> int:
 
     # Run CEGIS
     cegis = CEGIS(
-        form,
+        verifier,
         max_rounds=args.max_rounds,
         starting=args.starting,
         generations=args.generations,

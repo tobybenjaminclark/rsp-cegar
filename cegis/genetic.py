@@ -1,8 +1,12 @@
-from .form import *
-from .pr_ast import *
-import random, copy, numpy as np, functools, time
+from .ast import *
+from .verifier import CompleteOrderVerifier
+import copy
+import functools
+import math
+import random
+import time
 from tqdm import trange, tqdm
-from itertools import groupby
+from itertools import chain, groupby
 import sys
 
 
@@ -21,40 +25,48 @@ def timed(name, fn):
 
 @functools.lru_cache(None)
 def mc_env(n=100_000, low=0, high=1_000):
-    syms = list(FORM.symbol_set())
+    syms = list(VERIFIER.symbol_set())
     return {
-        s: np.random.uniform(low, high, n)
+        s: [random.uniform(low, high) for _ in range(n)]
         for s in syms
     }
 
 @functools.lru_cache(None)
 def mc_signature(rule, n=100_000):
     env = mc_env(n)
-    return rule.eval_np(env).astype(np.bool_)
+    return tuple(bool(value) for value in rule.eval_np(env))
 
 def sig_hash(sig):
-    return hash(sig.tobytes())
+    return hash(sig)
 
 @functools.lru_cache(None)
-def _equiv_z3(a_z3, b_z3):
-    s = z3.Solver()
-    s.add(z3.Not(a_z3 == b_z3))
-    return s.check() == z3.unsat
+def _equiv_cvc5(a, b):
+    return VERIFIER.equivalent(a, b)
 
 @functools.lru_cache(None)
 def monte_carlo(rule, n=100_000, low=0, high=1_000):
     env = mc_env(n, low, high)
-    return np.mean(rule.eval_np(env))
+    values = rule.eval_np(env)
+    return sum(bool(value) for value in values) / len(values)
 
 def entropy(p, eps=1e-9):
-    return -(p*np.log(p+eps) + (1-p)*np.log(1-p+eps))
+    return -(p * math.log(p + eps) + (1 - p) * math.log(1 - p + eps))
 
 
 
 
 
 TIMINGS = {}
-FORM = CompleteOrderForm()
+VERIFIER = CompleteOrderVerifier()
+
+
+def configure_verifier(verifier: CompleteOrderVerifier) -> None:
+    global VERIFIER
+    VERIFIER = verifier
+    mc_env.cache_clear()
+    mc_signature.cache_clear()
+    _equiv_cvc5.cache_clear()
+    monte_carlo.cache_clear()
 
 
 
@@ -72,7 +84,7 @@ class ProgramSearch:
         def filter_bucket(bucket):
             representatives = []
             for β in sorted(bucket, key=lambda x: x[1], reverse=True):
-                if not any(str(rep) == str(β[0]) or _equiv_z3(β[0].to_z3(), rep.to_z3())for rep in representatives):
+                if not any(str(rep) == str(β[0]) or _equiv_cvc5(β[0], rep) for rep in representatives):
                     representatives.append(β[0])
                     yield β
 
@@ -153,11 +165,10 @@ class ProgramSearch:
         return list(map(lambda x: x if x is not None else BooleanExpr.random(random.choice([1, 2, 3, 4])), mutpop))
 
     @staticmethod
-    def _fitness(β: BooleanExpr, Σ: [z3.Model], βmax: int) -> (float, float, float):
+    def _fitness(β: BooleanExpr, Σ: list[tuple[dict[str, float], bool]], βmax: int) -> (float, float, float):
         """ Compute fitness for a singular boolean expression. """
-        βz = β.to_z3()
         return (
-            (sum(z3.is_true(m.eval(βz, model_completion=True)) == e for m, e in Σ) / len(Σ)) if Σ else 0.5,
+            (sum(β.eval(sample) == expected for sample, expected in Σ) / len(Σ)) if Σ else 0.5,
             1 - len(β) / βmax,
             entropy(monte_carlo(β))
         )
