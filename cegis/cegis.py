@@ -74,7 +74,7 @@ class CEGIS:
 
     def synthesise(self) -> [BooleanExpr]:
         self.verify_seed_rules()
-        log("Invoking mutative weakening with seed rule")
+        log("Invoking Pruning Rule Weakening & Exploration.")
         total_new_rules = 0
         total_rejected = 0
         total_steps = self.max_rounds * self.generations

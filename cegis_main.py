@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from cegis.ast import set_symbol_universe
 from cegis.cegis import CEGIS
+from cegis.normalise import remove_implied_rules
 from cegis.seeds import seed_from_synthesis_result
 from cegis.verifier import CompleteOrderVerifier
 from synthesis.grammar import *
@@ -9,10 +10,10 @@ from synthesis.synth import *
 from synthesis import *
 
 
-MAX_ROUNDS = 10
-STARTING_POPULATION = 5
-GENERATIONS = 5
-ELITE = 5
+MAX_ROUNDS = 5
+STARTING_POPULATION = 3
+GENERATIONS = 3
+ELITE = 1
 TARGET_SOLUTIONS = 10
 SYGUS_TIMEOUT_MS = 10_000
 SYGUS_OBJECTIVE = "makespan"
@@ -88,10 +89,14 @@ def main() -> int:
         log("No Pruning Rules found.")
         return 0
 
-    log("Generated & Verified Pruning Conditions:\n")
+    log("Initial Verified Pruning Ruleset:\n")
     for rule in rules:
         print(f" ► {rule}")
-    return 0
+
+    log("Normalising Discovered Ruleset")
+    rules = remove_implied_rules(rules, verifier)
+    for rule in rules:
+        print(f" ► {rule}")
 
 
 if __name__ == "__main__":
