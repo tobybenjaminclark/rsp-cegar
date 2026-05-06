@@ -6,7 +6,7 @@ from .genetic import configure_verifier
 from .verifier import CompleteOrderVerifier
 import sys
 from tqdm import trange
-from synthesis.synth import log
+from sygus.synth import log
 
 
 

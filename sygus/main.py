@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from synthesis.grammar import Choice
-from synthesis.grammar import Grammar
-from synthesis.grammar import NonTerminal
-from synthesis.synth import log
-from synthesis.synth import make_rsp_swap_problem
-from synthesis.synth import synthesize_pruning_rule
+from sygus.grammar import Choice
+from sygus.grammar import Grammar
+from sygus.grammar import NonTerminal
+from sygus.synth import log
+from sygus.synth import make_rsp_swap_problem
+from sygus.synth import synthesize_pruning_rule
 
 OBJECTIVE = "delay+ctot"
 TIMEOUT_MS = 900_000

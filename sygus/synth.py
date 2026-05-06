@@ -14,10 +14,10 @@ from core.context import RSPContext
 from core.context import RSPSequenceContext
 from core.context import add_terms
 from core.context import make_context
-from synthesis.grammar import Grammar
-from synthesis.grammar import Terminal
-from synthesis.grammar import set_smt_env
-from synthesis.symbols import make_allowed_symbols
+from sygus.grammar import Grammar
+from sygus.grammar import Terminal
+from sygus.grammar import set_smt_env
+from sygus.symbols import make_allowed_symbols
 
 
 RESET = "\033[0m"

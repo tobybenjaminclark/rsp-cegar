@@ -5,9 +5,9 @@ from weakening.weaken import Weakener
 from normalise.normalise import remove_implied_rules
 from weakening.seeds import seed_from_synthesis_result
 from weakening.verifier import CompleteOrderVerifier
-from synthesis.grammar import *
-from synthesis.synth import *
-from synthesis import *
+from sygus.grammar import *
+from sygus.synth import *
+from sygus import *
 
 
 MAX_ROUNDS = 5

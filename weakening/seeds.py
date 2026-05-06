@@ -11,7 +11,7 @@ from .ast import Not
 from .ast import Or
 from .ast import Symbol
 from .verifier import CompleteOrderVerifier
-from synthesis.synth import SynthesisResult
+from sygus.synth import SynthesisResult
 
 
 def and_all(terms: list[BooleanExpr]) -> BooleanExpr:

@@ -1,6 +1,6 @@
 from core import RSPContext
 from core import RSPSequenceContext
-from synthesis import Terminal
+from sygus import Terminal
 
 _SYGUS_SCHEMA_FIELDS = (
     ("R_i", "r", "i"),
