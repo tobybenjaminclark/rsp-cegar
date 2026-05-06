@@ -62,11 +62,9 @@ class CompleteOrderVerifier:
         aircraft: tuple[str, ...] = ("p1", "i", "p2", "j", "p3"),
         *,
         integer_arithmetic: bool = False,
-        assume_separation_equivalence: bool = True,
     ) -> None:
         self.aircraft = aircraft
         self.integer_arithmetic = integer_arithmetic
-        self.assume_separation_equivalence = assume_separation_equivalence
 
     def symbol_set(self) -> list[str]:
         symbols: list[str] = []
@@ -81,8 +79,7 @@ class CompleteOrderVerifier:
     def verify_rule(self, rule: BooleanExpr) -> CEGISVerification:
         s1, s2, ctx = self._make_problem()
         rule_term = rule.to_cvc5(ctx.solver, self._symbol_table(ctx))
-        premises = [*self._base_premises(ctx), rule_term]
-        result = verify_pruning_rule(ctx, premises, self._delay_claim(s1, s2))
+        result = verify_pruning_rule(ctx, [rule_term], self._delay_claim(s1, s2))
         counterexample = None
         if isinstance(result, Unverified) and isinstance(result.counterexample, Counterexample):
             counterexample = self._sample_from_counterexample(result.counterexample, ctx)
@@ -93,7 +90,6 @@ class CompleteOrderVerifier:
         solver = ctx.solver
         assertions = [
             *ctx.foundational_constraints,
-            *self._base_premises(ctx),
             rule.to_cvc5(solver, self._symbol_table(ctx)),
         ]
         solver.push()
@@ -135,11 +131,6 @@ class CompleteOrderVerifier:
         s1 = ctx.with_sequence(self.aircraft)
         s2 = ctx.with_sequence(("p1", "j", "p2", "i", "p3"))
         return s1, s2, ctx
-
-    def _base_premises(self, ctx: RSPContext) -> list[object]:
-        if not self.assume_separation_equivalence:
-            return []
-        return ctx.separation_equivalence("i", "j")
 
     def _delay_claim(self, s1: RSPSequenceContext, s2: RSPSequenceContext):
         solver = s1.ctx.solver

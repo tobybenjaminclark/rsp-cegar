@@ -143,12 +143,29 @@ class ProgramSearch:
         """ Generate an initial population of `n` boolean expressions."""
         return [BooleanExpr.random(random.choice([1, 2, 3, 4])) for _ in range(n)]
 
+    @staticmethod
+    def gen_seeded(seed_rules: list[BooleanExpr], n: int):
+        """Generate an initial population around supplied seed expressions."""
+        if not seed_rules:
+            return ProgramSearch.gen_initial(n)
+
+        pop = [copy.deepcopy(seed) for seed in seed_rules[:n]]
+        while len(pop) < n:
+            seed = copy.deepcopy(random.choice(seed_rules))
+            pop.append(ProgramSearch.mutate_one(seed))
+        return pop
+
 
     @staticmethod
-    def selection(fitpop):
+    def selection(fitpop, seed_rules=None):
         """ Keep top 25% by fitness; others replaced with None for breeding. """
         ranked = sorted(fitpop, key=lambda x: x[1], reverse=True)
-        return [expr for expr, *_ in ranked[:len(ranked) // 4]] + [None] * (len(ranked) - len(ranked) // 4)
+        survivors = [expr for expr, *_ in ranked[:len(ranked) // 4]]
+        for seed in seed_rules or []:
+            if not any(str(seed) == str(survivor) for survivor in survivors):
+                survivors.append(copy.deepcopy(seed))
+        survivors = survivors[:len(ranked)]
+        return survivors + [None] * (len(ranked) - len(survivors))
 
 
     @staticmethod
@@ -165,11 +182,11 @@ class ProgramSearch:
         return list(map(lambda x: x if x is not None else BooleanExpr.random(random.choice([1, 2, 3, 4])), mutpop))
 
     @staticmethod
-    def _fitness(β: BooleanExpr, Σ: list[tuple[dict[str, float], bool]], βmax: int) -> (float, float, float):
+    def _fitness(β: BooleanExpr, Σ: list[tuple[dict[str, float], bool]]) -> (float, float, float):
         """ Compute fitness for a singular boolean expression. """
         return (
             (sum(β.eval(sample) == expected for sample, expected in Σ) / len(Σ)) if Σ else 0.5,
-            1 - len(β) / βmax,
+            0.0,
             entropy(monte_carlo(β))
         )
 
@@ -177,17 +194,16 @@ class ProgramSearch:
     @staticmethod
     def fitness(pop: [BooleanExpr], Σ) -> [float]:
         """ Compute weighted fitness for a generation of boolean expressions. """
-        βmax = len(max(pop, key=len))
-        ω = (4.0, 1.0, 1.0)
+        ω = (4.0, 0.0, 1.0)
         return [
             (β, (ω[0] * t1 + ω[1] * t2 + ω[2] * t3) / sum(ω), t1, t2, t3)
             for β in pop
-            for (t1, t2, t3) in (ProgramSearch._fitness(β, Σ, βmax),)
+            for (t1, t2, t3) in (ProgramSearch._fitness(β, Σ),)
         ]
 
 
     @staticmethod
-    def run_generation(pop, Σ, antiduplication, elite=2):
+    def run_generation(pop, Σ, antiduplication, elite=2, seed_rules=None):
         """Run one generation step and return the next population."""
 
         fitpop = ProgramSearch.fitness(pop, Σ)
@@ -197,27 +213,31 @@ class ProgramSearch:
 
         elites = [e for e, *_ in sorted(fitpop, key=lambda x: x[1], reverse=True)[:elite]]
 
-        surpop = ProgramSearch.selection(fitpop)
+        surpop = ProgramSearch.selection(fitpop, seed_rules=seed_rules)
         sexpop = timed("crossover", lambda: ProgramSearch.crossover(surpop))
         mutpop = timed("mutation", lambda: ProgramSearch.mutation(sexpop))
 
         mutpop[:elite] = elites
+        for seed in seed_rules or []:
+            if not any(str(seed) == str(expr) for expr in mutpop):
+                mutpop[-1] = copy.deepcopy(seed)
         return mutpop, fitpop, _rem
 
 
     @staticmethod
-    def search(start=10, gens=1000, elite=2, Σ=None, pop=None, antiduplication=True):
+    def search(start=10, gens=1000, elite=2, Σ=None, pop=None, antiduplication=True, seed_rules=None):
         Σ = Σ or []
+        seed_rules = seed_rules or []
 
         duplicates_removed = 0
 
         # See if CEGIS has removed any population
-        if pop is None:         pop = ProgramSearch.gen_initial(start)
-        elif len(pop) < start:  pop = pop + ProgramSearch.gen_initial(start - len(pop))
+        if pop is None:         pop = ProgramSearch.gen_seeded(seed_rules, start)
+        elif len(pop) < start:  pop = pop + ProgramSearch.gen_seeded(seed_rules, start - len(pop))
 
         with trange(gens, desc=" ► 𝗥𝘂𝗻𝗻𝗶𝗻𝗴 𝗣𝗿𝗼𝗴𝗿𝗮𝗺 𝗦𝗲𝗮𝗿𝗰𝗵", leave=True, file=sys.stdout, colour='green', bar_format='{l_bar}{bar:50}{r_bar}{bar:-10b}') as bar:
             for g in bar:
-                pop, fitpop, _rem = ProgramSearch.run_generation(pop, Σ, antiduplication, elite=elite)
+                pop, fitpop, _rem = ProgramSearch.run_generation(pop, Σ, antiduplication, elite=elite, seed_rules=seed_rules)
                 duplicates_removed += _rem
 
         if antiduplication:
