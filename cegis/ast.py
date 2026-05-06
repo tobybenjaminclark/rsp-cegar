@@ -20,7 +20,7 @@ class Evaluable:
 class NumpyEvaluable:
     def eval(self):    raise NotImplementedError()
 
-# Define a trait necessitating an object must convert to SMT
+# Define a trait necessitating an object must convert to SMT within the cvc5 framework
 class SMTConvertible:
     def to_cvc5(self, solver: cvc5.Solver, symbols=None):    raise NotImplementedError()
 
@@ -131,10 +131,11 @@ class And(BooleanExpr):
     def __str__(self):      return f"{self.left} ∧ {self.right}"
     def __iter__(self):     return iter((self.left, self.right))
     def mutate(self):       return Or(self.left, self.right)
-    def to_cvc5(self, solver: cvc5.Solver, symbols=None):
-        return solver.mkTerm(Kind.AND, self.left.to_cvc5(solver, symbols), self.right.to_cvc5(solver, symbols))
     def eval(self, sample): return self.left.eval(sample) and self.right.eval(sample)
     def eval_np(self, arr): return [left and right for left, right in zip(self.left.eval_np(arr), self.right.eval_np(arr))]
+
+    def to_cvc5(self, solver: cvc5.Solver, symbols=None):
+        return solver.mkTerm(Kind.AND, self.left.to_cvc5(solver, symbols), self.right.to_cvc5(solver, symbols))
 
     @classmethod
     def random(_, depth=2):     return And(BooleanExpr.random(depth-1), BooleanExpr.random(depth-1))
@@ -148,10 +149,11 @@ class Or(BooleanExpr):
     def __str__(self):      return f"{self.left} ∨ {self.right}"
     def __iter__(self):     return iter((self.left, self.right))
     def mutate(self):       return And(self.left, self.right)
-    def to_cvc5(self, solver: cvc5.Solver, symbols=None):
-        return solver.mkTerm(Kind.OR, self.left.to_cvc5(solver, symbols), self.right.to_cvc5(solver, symbols))
     def eval(self, sample): return self.left.eval(sample) or self.right.eval(sample)
     def eval_np(self, arr): return [left or right for left, right in zip(self.left.eval_np(arr), self.right.eval_np(arr))]
+
+    def to_cvc5(self, solver: cvc5.Solver, symbols=None):
+        return solver.mkTerm(Kind.OR, self.left.to_cvc5(solver, symbols), self.right.to_cvc5(solver, symbols))
 
     @classmethod
     def random(_, depth=2):
@@ -165,10 +167,11 @@ class Not(BooleanExpr):
     def __str__(self):      return f"¬ ({self.inner})"
     def __iter__(self):     return iter((self.inner,))
     def mutate(self):       return (self.inner)
-    def to_cvc5(self, solver: cvc5.Solver, symbols=None):
-        return solver.mkTerm(Kind.NOT, self.inner.to_cvc5(solver, symbols))
     def eval(self, sample): return not (self.inner.eval(sample))
     def eval_np(self, arr): return [not value for value in self.inner.eval_np(arr)]
+
+    def to_cvc5(self, solver: cvc5.Solver, symbols=None):
+        return solver.mkTerm(Kind.NOT, self.inner.to_cvc5(solver, symbols))
 
     @classmethod
     def random(_, depth=2):
@@ -185,9 +188,13 @@ class Cmp(BooleanExpr):
     def __str__(self):      return f"{self.left} {self.op.value} {self.right}"
     def __iter__(self):     return iter((self.left, self.right))
     def mutate(self):       return Cmp(self.left, random.choice(list(CmpOp)), self.right)
+
     def to_cvc5(self, solver: cvc5.Solver, symbols=None):
         return self.op.to_cvc5(solver, self.left.to_cvc5(solver, symbols), self.right.to_cvc5(solver, symbols))
-    def eval(self, sample): return self.op.get_op()(self.left.eval(sample), self.right.eval(sample))
+
+    def eval(self, sample):
+        return self.op.get_op()(self.left.eval(sample), self.right.eval(sample))
+
     def eval_np(self, arr):
         op = self.op.get_op()
         return [op(left, right) for left, right in zip(self.left.eval_np(arr), self.right.eval_np(arr))]
@@ -209,14 +216,17 @@ class Binary(ArithExpr):
     def __init__(self,  l: ArithExpr, o: ArithOp, r: ArithExpr):  super().__init__(left=l, op=o, right=r)
     def __iter__(self):     return iter((self.left, self.right))
     def mutate(self):       return Binary(self.left, random.choice(list(ArithOp)), self.right)
+
     def to_cvc5(self, solver: cvc5.Solver, symbols=None):
         return self.op.to_cvc5(solver, self.left.to_cvc5(solver, symbols), self.right.to_cvc5(solver, symbols))
+
     def eval(self, sample):
         left = self.left.eval(sample)
         right = self.right.eval(sample)
         if self.op == ArithOp.DIV and right == 0:
             return float("inf")
         return self.op.get_op()(left, right)
+
     def eval_np(self, arr):
         op = self.op.get_op()
         left_values = self.left.eval_np(arr)
@@ -236,12 +246,13 @@ class Number(ArithExpr):
     def __str__(self):      return str(self.value)
     def __iter__(self):     return iter(())
     def mutate(self):       return Number(self.value + random.randrange(-50, 50) / 100)
+    def eval(self, sample): return float(self.value)
+    def eval_np(self, arr): return [float(self.value)] * len(next(iter(arr.values())))
+
     def to_cvc5(self, solver: cvc5.Solver, symbols=None):
         if float(self.value).is_integer():
             return solver.mkInteger(int(self.value))
         return solver.mkReal(str(self.value))
-    def eval(self, sample): return float(self.value)
-    def eval_np(self, arr): return [float(self.value)] * len(next(iter(arr.values())))
 
     @classmethod
     def random(_, depth=0):     return random.choice(SYMBOLS)
@@ -252,13 +263,13 @@ class Symbol(ArithExpr):
     def __str__(self):      return self.iden
     def __iter__(self):     return iter(())
     def mutate(self):       return random.choice(SYMBOLS)
+    def eval(self, sample): return sample[self.iden]
+    def eval_np(self, arr): return arr[self.iden]
+
     def to_cvc5(self, solver: cvc5.Solver, symbols=None):
         if symbols and self.iden in symbols:
             return symbols[self.iden]
         return solver.mkConst(solver.getRealSort(), self.iden)
-    def eval(self, sample): return sample[self.iden]
-    def eval_np(self, arr): return arr[self.iden]
-
 
     @classmethod
     def random(_, depth=0):     return random.choice(SYMBOLS)
