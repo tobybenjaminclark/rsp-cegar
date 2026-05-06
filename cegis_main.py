@@ -85,10 +85,10 @@ def main() -> int:
     rules = cegis.synthesise()
 
     if not rules:
-        print("\nNo Pruning Rules found.")
+        log("No Pruning Rules found.")
         return 0
 
-    print("\nGenerated & Verified Pruning Conditions:")
+    log("Generated & Verified Pruning Conditions:\n")
     for rule in rules:
         print(f" ► {rule}")
     return 0

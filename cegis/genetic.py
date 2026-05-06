@@ -4,8 +4,6 @@ import copy
 import functools
 import random
 import time
-from tqdm import trange, tqdm
-import sys
 
 
 
@@ -187,6 +185,8 @@ class ProgramSearch:
         """Mutate a population using weakening-only moves."""
         mutpop = [ProgramSearch.mutate_one(p) if random.random() < chance and p is not None else p for p in pop]
         parents = [p for p in pop if p is not None]
+        if not parents:
+            return []
         return [
             value if value is not None else ProgramSearch.mutate_one(random.choice(parents))
             for value in mutpop
@@ -240,7 +240,7 @@ class ProgramSearch:
 
 
     @staticmethod
-    def search(start=10, gens=1000, pop=None, seed_rules=None, verifier=None):
+    def search(start=10, gens=1000, pop=None, seed_rules=None, verifier=None, progress=None):
         seed_rules = seed_rules or []
         verifier = verifier or VERIFIER
 
@@ -252,10 +252,10 @@ class ProgramSearch:
         total_rejected += rejected
         pop = ProgramSearch.replenish(pop, start, seed_rules, verifier)
 
-        with trange(gens, desc=" ► 𝗥𝘂𝗻𝗻𝗶𝗻𝗴 𝗣𝗿𝗼𝗴𝗿𝗮𝗺 𝗦𝗲𝗮𝗿𝗰𝗵", leave=True, file=sys.stdout, colour='green', bar_format='{l_bar}{bar:50}{r_bar}{bar:-10b}') as bar:
-            for g in bar:
-                pop, rejected = ProgramSearch.run_generation(pop, verifier, start=start, seed_rules=seed_rules)
-                total_rejected += rejected
+        for _ in range(gens):
+            pop, rejected = ProgramSearch.run_generation(pop, verifier, start=start, seed_rules=seed_rules)
+            total_rejected += rejected
+            if progress is not None:
+                progress.update(1)
 
-        tqdm.write(f" ► Rejected {total_rejected} unsound/vacuous weakened candidates")
-        return pop
+        return pop, total_rejected
