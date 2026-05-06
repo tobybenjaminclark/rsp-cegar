@@ -1,8 +1,8 @@
 from __future__ import annotations
 from collections.abc import Iterable
 from cvc5 import Kind
-from .ast import BooleanExpr
-from .verifier import CompleteOrderVerifier
+from weakening.ast import BooleanExpr
+from weakening.verifier import CompleteOrderVerifier
 
 
 

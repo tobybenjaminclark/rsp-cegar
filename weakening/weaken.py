@@ -17,7 +17,7 @@ _MC_CACHE = {}
 
 
 
-class CEGIS:
+class Weakener:
     def __init__(self, verifier: CompleteOrderVerifier | None = None, *, max_rounds=50, starting=30,
                  generations=50, elite=4, target_solutions=5, seed_rules=None):
         self.verifier = verifier or CompleteOrderVerifier()

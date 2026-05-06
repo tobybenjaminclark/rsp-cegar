@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from cegis.ast import set_symbol_universe
-from cegis.cegis import CEGIS
-from cegis.normalise import remove_implied_rules
-from cegis.seeds import seed_from_synthesis_result
-from cegis.verifier import CompleteOrderVerifier
+from weakening.ast import set_symbol_universe
+from weakening.weaken import Weakener
+from normalise.normalise import remove_implied_rules
+from weakening.seeds import seed_from_synthesis_result
+from weakening.verifier import CompleteOrderVerifier
 from synthesis.grammar import *
 from synthesis.synth import *
 from synthesis import *
@@ -74,7 +74,7 @@ def main() -> int:
 
     seed_rules = [seed_from_synthesis_result(verifier, result)]
 
-    cegis = CEGIS(
+    cegis = Weakener(
         verifier,
         max_rounds=MAX_ROUNDS,
         starting=STARTING_POPULATION,
